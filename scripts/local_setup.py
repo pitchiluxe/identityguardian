@@ -21,6 +21,12 @@ def main():
         ("alex", ["org_admin", "operator"]),
         ("jordan", ["approver"]),
         ("sam", ["viewer"]),
+        ("riley", ["reviewer"]),
+        ("casey", ["investigator"]),
+        ("morgan", ["auditor"]),
+        ("quinn", ["operator"]),
+        ("lee", ["learner"]),
+        ("jamie", ["approver"]),
     ]:
         people.append(
             dict(id=str(uuid4()), username=name, password=secrets.token_urlsafe(20), roles=roles)

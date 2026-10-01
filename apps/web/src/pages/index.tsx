@@ -8,6 +8,7 @@ import { Administration, AuditLog } from './Admin';
 import { Integrations } from './Integrations';
 import { AttackPaths } from './Paths';
 import { Radar } from './Radar';
+import { Reviews } from './Reviews';
 import { Applications, GraphExplorer, Identities } from './Twin';
 
 export type PageDef = { subtitle: string; capability?: string; denied?: string; org?: boolean; render: (ctx: Ctx, overview: Overview) => ReactNode };
@@ -40,6 +41,7 @@ export const PAGES: Record<string, PageDef> = {
   Access: { subtitle: 'Effective access with every route, condition, deny and its evidence.', capability: 'access:read', render: ctx => <Access {...ctx}/> },
   'Privilege radar': { subtitle: 'Retained previous-role access, leavers, dormant privilege and unused entitlements.', capability: 'findings:read', render: ctx => <Radar {...ctx}/> },
   'Attack paths': { subtitle: 'Evidenced potential exposure to sensitive resources, with defensive controls.', capability: 'findings:read', render: ctx => <AttackPaths {...ctx}/> },
+  'Access reviews': { subtitle: 'Evidence-backed certification. REMOVE creates a proposal; it never revokes.', capability: 'findings:read', render: ctx => <Reviews {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Sandbox connector, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
   Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <Administration org={ctx.org} session={ctx.session} can={ctx.can}/> },
