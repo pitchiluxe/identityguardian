@@ -38,6 +38,7 @@ class Edge:
     valid_to: datetime | None
     observation_id: str
     end_inferred: bool = False
+    recorded_from: datetime | None = None
 
 
 @dataclass
@@ -103,7 +104,7 @@ def load(conn, environment_id, effective_at=None, known_at=None) -> Snapshot:
         )
     rows = conn.execute(
         "SELECT rr.id, r.id AS relationship_id, r.type, r.classification, r.from_node, r.to_node, "
-        "rr.attributes, rr.valid_from, rr.valid_to, rr.observation_id, rr.end_inferred "
+        "rr.attributes, rr.valid_from, rr.valid_to, rr.observation_id, rr.end_inferred, rr.recorded_from "
         "FROM relationships r JOIN relationship_revisions rr ON rr.relationship_id=r.id "
         "WHERE r.environment_id=%s AND rr.recorded_from<=%s AND (rr.recorded_to IS NULL OR rr.recorded_to>%s) "
         "AND rr.valid_from<=%s AND (rr.valid_to IS NULL OR rr.valid_to>%s)",
@@ -126,6 +127,7 @@ def load(conn, environment_id, effective_at=None, known_at=None) -> Snapshot:
                 r["valid_to"],
                 str(r["observation_id"]),
                 r["end_inferred"],
+                r["recorded_from"],
             )
         )
     watermark = conn.execute(
@@ -163,6 +165,7 @@ def edge_json(edge: Edge):
         valid_to=edge.valid_to.isoformat() if edge.valid_to else None,
         evidence_id=edge.observation_id,
         end_inferred=edge.end_inferred,
+        recorded_from=edge.recorded_from.isoformat() if edge.recorded_from else None,
     )
 
 

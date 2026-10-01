@@ -14,6 +14,7 @@ import { Machines } from './Machines';
 import { AttackPaths } from './Paths';
 import { Radar } from './Radar';
 import { Reviews } from './Reviews';
+import { TimeMachine } from './TimeMachine';
 import { Applications, GraphExplorer, Identities } from './Twin';
 
 export type PageDef = { subtitle: string; capability?: string; denied?: string; org?: boolean; render: (ctx: Ctx, overview: Overview) => ReactNode };
@@ -53,6 +54,7 @@ export const PAGES: Record<string, PageDef> = {
   'Machine identities': { subtitle: 'Owners, credential lifecycle metadata, dependencies and privileged access.', capability: 'identity:read', render: ctx => <Machines {...ctx}/> },
   'AI agents': { subtitle: 'Registered agents: declared scope versus effective access, expiry and observed activity.', capability: 'identity:read', render: ctx => <Agents {...ctx}/> },
   Lifecycle: { subtitle: 'Joiner baselines, mover retain/review/remove and leaver dependency plans.', capability: 'findings:read', render: ctx => <Lifecycle {...ctx}/> },
+  'Time machine': { subtitle: 'What applied at a time, as known then versus as known now, with coverage.', capability: 'history:read', render: ctx => <TimeMachine {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Sandbox connector, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
   Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <Administration org={ctx.org} session={ctx.session} can={ctx.can}/> },
