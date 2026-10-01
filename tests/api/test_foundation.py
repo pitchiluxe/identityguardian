@@ -251,8 +251,10 @@ def test_audit_failure_rolls_back_proposal(client, tenant):
     org, _, people = tenant
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
         conn.execute(
+            # Scoped to this test's tenant so concurrently running tests are unaffected.
             "CREATE FUNCTION test_reject_audit() RETURNS trigger LANGUAGE plpgsql AS $$ "
-            "BEGIN RAISE EXCEPTION 'test audit failure'; END $$"
+            f"BEGIN IF NEW.organization_id = '{org}' THEN RAISE EXCEPTION 'test audit failure'; "
+            "END IF; RETURN NEW; END $$"
         )
         conn.execute(
             "CREATE TRIGGER test_audit_failure BEFORE INSERT ON audit_events "
