@@ -1,3 +1,3 @@
-from . import access, findings, reviews, twin
+from . import access, changes, findings, reviews, twin
 
-ROUTERS = [twin.router, access.router, findings.router, reviews.router]
+ROUTERS = [twin.router, access.router, findings.router, reviews.router, changes.router]
