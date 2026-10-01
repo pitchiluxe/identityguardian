@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 // One worker: browser flows share the bootstrapped synthetic organization and run in file order.
 export default defineConfig({
+  timeout: 90_000,
   testDir: './tests/e2e', workers: 1, reporter: 'list',
   use: { baseURL: 'http://localhost:8000', headless: true },
   projects: [

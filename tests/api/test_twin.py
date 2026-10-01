@@ -218,3 +218,27 @@ def test_identity_pagination(client, twin):
         "data"
     ]
     assert len(machines) == 4
+
+
+def test_source_object_returning_to_earlier_state_is_reingested(client, twin):
+    """Regression: a removed grant restored at the source must reappear in the twin."""
+    base, headers = twin["base"], twin["headers"]
+
+    def remove(body):
+        body["valid_to"] = "2026-09-29T12:00:00+00:00"
+        return body, True
+
+    def restore(body):
+        body["valid_to"] = None
+        return body, False
+
+    source_update(twin["env"], "mem-erick-grp-finance-legacy", remove)
+    client.post(base + "/connectors/sandbox/sync", json={}, headers=headers)
+    source_update(twin["env"], "mem-erick-grp-finance-legacy", restore)
+    run = client.post(base + "/connectors/sandbox/sync", json={}, headers=headers).json()["data"]
+    assert run["observed"] == 1 and run["unchanged"] == 0
+    groups = {
+        r["other"]["external_id"]
+        for r in client.get(base + "/nodes/idn-erick").json()["data"]["relationships"]
+    }
+    assert "grp-finance-legacy" in groups

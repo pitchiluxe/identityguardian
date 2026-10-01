@@ -57,6 +57,52 @@ def otp_credential(seed):
     )
 
 
+def configure_amr(client, headers):
+    """Emit an `amr` claim (pwd / otp) so the platform can verify MFA assurance."""
+    admin = f"{KEYCLOAK}/admin/realms/{REALM}"
+    clients = client.get(
+        f"{admin}/clients", params={"clientId": "identityguardian"}, headers=headers
+    ).json()
+    cid = clients[0]["id"]
+    mappers = client.get(f"{admin}/clients/{cid}/protocol-mappers/models", headers=headers).json()
+    if not any(m["protocolMapper"] == "oidc-amr-mapper" for m in mappers):
+        client.post(
+            f"{admin}/clients/{cid}/protocol-mappers/models",
+            headers=headers,
+            json=dict(
+                name="amr",
+                protocol="openid-connect",
+                protocolMapper="oidc-amr-mapper",
+                config={"id.token.claim": "true", "access.token.claim": "true"},
+            ),
+        ).raise_for_status()
+    references = {"auth-username-password-form": "pwd", "auth-otp-form": "otp"}
+    executions = client.get(
+        f"{admin}/authentication/flows/browser/executions", headers=headers
+    ).json()
+    for execution in executions:
+        value = references.get(execution.get("providerId"))
+        if not value:
+            continue
+        # maxAge matches the platform's 5-minute MFA recency requirement.
+        config = {"default.reference.value": value, "default.reference.maxAge": "300"}
+        if execution.get("authenticationConfig"):
+            existing = client.get(
+                f"{admin}/authentication/config/{execution['authenticationConfig']}",
+                headers=headers,
+            ).json()
+            existing["config"] = config
+            client.put(
+                f"{admin}/authentication/config/{existing['id']}", headers=headers, json=existing
+            ).raise_for_status()
+        else:
+            client.post(
+                f"{admin}/authentication/executions/{execution['id']}/config",
+                headers=headers,
+                json=dict(alias=f"amr-{value}", config=config),
+            ).raise_for_status()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mfa", action="append", default=[], help="enrol TOTP for this username")
@@ -67,6 +113,7 @@ def main():
     known = {p["username"] for p in people}
     with httpx.Client(timeout=15) as client:
         headers = {"Authorization": "Bearer " + admin_token(client)}
+        configure_amr(client, headers)
         added = []
         for name, roles in EXTRA:
             if name in known:

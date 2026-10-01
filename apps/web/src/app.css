@@ -59,3 +59,4 @@ pre.code{background:#091524;padding:14px;border-radius:6px;overflow:auto;margin:
 @media(max-width:760px){.freshness{display:none}.toolbar{padding:14px}.search input{min-width:0;width:100%}.kv{padding:6px 16px 12px}}
 .text-input{width:100%;display:block;background:#0b192b;color:#d8e5f2;border:1px solid #3a5069;border-radius:5px;padding:10px;margin:8px 0 18px}
 .decision{margin-top:12px}
+.approval-box{border:1px solid #2f4560;border-radius:8px;padding:14px;margin-top:14px;width:100%}.approval-box code{overflow-wrap:anywhere}

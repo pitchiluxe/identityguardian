@@ -1,5 +1,6 @@
 """Phases 7–8: what-if simulations and the change-request workflow."""
 
+import secrets
 from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID, uuid4
@@ -14,7 +15,7 @@ from ..domain.types import validate
 from ..jsonutil import dumps
 from ..jsonutil import jsonb as Jsonb
 from ..scope import envelope, scoped
-from ..security import digest
+from ..security import capabilities, digest, require_recent_mfa
 from .twin import ENV, snapshot_for
 
 router = APIRouter(prefix="/api/v1/organizations/{org}")
@@ -214,3 +215,321 @@ def get_change(org: UUID, env: UUID, change_id: UUID, request: Request):
             (str(change_id),),
         ).fetchall()
         return envelope(scope, dict(change=change, simulation=sim, history=history))
+
+
+class Transition(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
+
+
+class ApprovalRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    digest: str = Field(min_length=16, max_length=64)
+    decision: Literal["APPROVE", "REJECT"]
+    justification: str = Field(min_length=8, max_length=2000)
+
+
+class ExecuteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    digest: str = Field(min_length=16, max_length=64)
+
+
+class JitRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    identity: str = Field(max_length=120)
+    group: str = Field(max_length=120)
+    duration_minutes: int = Field(ge=15, le=480)
+    justification: str = Field(min_length=8, max_length=2000)
+    idempotency_key: UUID
+
+
+class FaultRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    operation: Literal["remove_relationship", "add_relationship"]
+    mode: Literal["fail_before_write", "timeout_after_write"]
+    remaining: int = Field(1, ge=0, le=5)
+
+
+def require_mfa(scope):
+    try:
+        require_recent_mfa(scope.user["amr"], scope.user["auth_time"])
+    except ValueError as exc:
+        raise HTTPException(403, str(exc)) from None
+
+
+def capability_for(change, action):
+    jit = change["kind"] == "jit_grant"
+    return {
+        "approve": "jit:approve" if jit else "change:approve",
+        "execute": "jit:execute" if jit else "change:execute",
+    }[action]
+
+
+def simulation_current(scope, change):
+    """The bound simulation if unexpired and its target versions are current; False if stale."""
+    sim = scope.conn.execute(
+        "SELECT * FROM simulations WHERE id=%s", (change["simulation_id"],)
+    ).fetchone()
+    if not sim or sim["expires_at"] <= datetime.now(timezone.utc):
+        return None
+    for rel_id, revision in (sim["source_versions"] or {}).items():
+        current = scope.conn.execute(
+            "SELECT id FROM relationship_revisions WHERE relationship_id=%s AND recorded_to IS NULL "
+            "AND (valid_to IS NULL OR valid_to>now()) ORDER BY valid_from DESC LIMIT 1",
+            (rel_id,),
+        ).fetchone()
+        if not current or str(current["id"]) != revision:
+            return False
+    return sim
+
+
+@router.post(ENV + "/change-requests/{change_id}/submit")
+def submit(org: UUID, env: UUID, change_id: UUID, body: Transition, request: Request):
+    with scoped(request, org, env, "change:propose") as scope:
+        change = load_change(scope, change_id, lock=True)
+        if change["status"] != "SIMULATED":
+            raise HTTPException(409, "Only simulated requests can be submitted for approval")
+        if not simulation_current(scope, change):
+            raise HTTPException(409, "Simulation expired or target changed; re-simulate first")
+        moved = changes.transition(scope.conn, change, "IN_REVIEW", body.expected_version)
+        scope.audit(
+            "change.submitted",
+            change_id,
+            change["justification"],
+            before=dict(status=change["status"]),
+            after=dict(status="IN_REVIEW", digest=change["digest"]),
+        )
+        return envelope(scope, moved)
+
+
+@router.post(ENV + "/change-requests/{change_id}/decision")
+def decide_change(org: UUID, env: UUID, change_id: UUID, body: ApprovalRequest, request: Request):
+    with scoped(request, org, env, "overview:read") as scope:
+        change = load_change(scope, change_id, lock=True)
+        if capability_for(change, "approve") not in capabilities(scope.member["roles"]):
+            raise HTTPException(403, "Your role does not allow this action")
+        require_mfa(scope)
+        if change["requester_id"] == scope.user_id:
+            raise HTTPException(403, "Approval must be independent of the requester")
+        if change["status"] != "IN_REVIEW":
+            raise HTTPException(409, "Request is not awaiting approval")
+        if not secrets.compare_digest(change["digest"] or "", body.digest):
+            raise HTTPException(409, "Proposal digest changed; review the current simulation")
+        sim = simulation_current(scope, change)
+        if sim is False or sim is None:
+            status = "STALE" if sim is False else "EXPIRED"
+            reason = (
+                "Target changed since simulation"
+                if sim is False
+                else "Simulation expired before approval"
+            )
+            changes.transition(scope.conn, change, status)
+            scope.audit(f"change.{status.lower()}", change_id, reason, result="refused")
+            # Commit the state change, then report the refusal.
+            scope.conn.commit()
+            raise HTTPException(409, f"{reason}; request marked {status}")
+        approval = scope.conn.execute(
+            "INSERT INTO approvals(id,organization_id,change_request_id,approver_id,decision,digest,"
+            "justification,auth_time,amr,expires_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING *",
+            (
+                uuid4(),
+                org,
+                change_id,
+                scope.user_id,
+                body.decision,
+                body.digest,
+                body.justification,
+                scope.user["auth_time"],
+                scope.user["amr"],
+                datetime.now(timezone.utc) + APPROVAL_TTL,
+            ),
+        ).fetchone()
+        status = "APPROVED" if body.decision == "APPROVE" else "REJECTED"
+        moved = changes.transition(scope.conn, change, status)
+        scope.audit(
+            f"change.{status.lower()}",
+            change_id,
+            body.justification,
+            before=dict(status="IN_REVIEW"),
+            after=dict(status=status, digest=body.digest),
+            approval=approval["id"],
+        )
+        return envelope(scope, dict(change=moved, approval=approval))
+
+
+@router.post(ENV + "/change-requests/{change_id}/execute", status_code=202)
+def execute(org: UUID, env: UUID, change_id: UUID, body: ExecuteRequest, request: Request):
+    with scoped(request, org, env, "overview:read") as scope:
+        if scope.environment["kind"] == "PRODUCTION":
+            raise HTTPException(
+                409, "Execution is limited to sandbox connectors; no production adapter is approved"
+            )
+        change = load_change(scope, change_id, lock=True)
+        if capability_for(change, "execute") not in capabilities(scope.member["roles"]):
+            raise HTTPException(403, "Your role does not allow this action")
+        require_mfa(scope)
+        if change["status"] != "APPROVED":
+            raise HTTPException(409, "Only approved requests can be executed")
+        approval = scope.conn.execute(
+            "SELECT * FROM approvals WHERE change_request_id=%s AND decision='APPROVE' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (change_id,),
+        ).fetchone()
+        if approval["approver_id"] == scope.user_id:
+            raise HTTPException(403, "The approver cannot also execute the change")
+        if (
+            not secrets.compare_digest(approval["digest"], body.digest)
+            or approval["digest"] != change["digest"]
+        ):
+            raise HTTPException(409, "Digest does not match the approved proposal")
+        if approval["expires_at"] <= datetime.now(timezone.utc):
+            changes.transition(scope.conn, change, "EXPIRED")
+            scope.audit(
+                "change.expired", change_id, "Approval expired before execution", result="refused"
+            )
+            scope.conn.commit()
+            raise HTTPException(409, "Approval expired; request marked EXPIRED")
+        moved = changes.transition(scope.conn, change, "QUEUED")
+        execution = scope.conn.execute(
+            "INSERT INTO executions(id,organization_id,change_request_id,approval_id,executor_id,"
+            "digest,status) VALUES(%s,%s,%s,%s,%s,%s,'QUEUED') RETURNING *",
+            (uuid4(), org, change_id, approval["id"], scope.user_id, body.digest),
+        ).fetchone()
+        scope.conn.execute(
+            "INSERT INTO outbox(id,organization_id,event_type,payload) "
+            "VALUES(%s,%s,'change_execution_requested',%s)",
+            (
+                uuid4(),
+                org,
+                Jsonb(dict(change_request_id=str(change_id), execution_id=str(execution["id"]))),
+            ),
+        )
+        scope.audit(
+            "change.queued",
+            change_id,
+            change["justification"],
+            after=dict(status="QUEUED"),
+            approval=approval["id"],
+        )
+        return envelope(
+            scope,
+            dict(
+                change=moved,
+                execution=execution,
+                status_url=f"/api/v1/organizations/{org}/environments/{env}/change-requests/{change_id}",
+            ),
+        )
+
+
+@router.post(ENV + "/change-requests/{change_id}/cancel")
+def cancel(org: UUID, env: UUID, change_id: UUID, body: Transition, request: Request):
+    with scoped(request, org, env, "change:propose") as scope:
+        change = load_change(scope, change_id, lock=True)
+        if change["requester_id"] != scope.user_id:
+            raise HTTPException(403, "Only the requester can cancel this request")
+        moved = changes.transition(scope.conn, change, "CANCELLED", body.expected_version)
+        scope.audit(
+            "change.cancelled", change_id, "Cancelled by requester", after=dict(status="CANCELLED")
+        )
+        return envelope(scope, moved)
+
+
+@router.post(ENV + "/jit-requests", status_code=201)
+def request_jit(org: UUID, env: UUID, body: JitRequest, request: Request):
+    with scoped(request, org, env, "jit:request") as scope:
+        snap = snapshot_for(scope)
+        src, dst = snap.by_external(body.identity), snap.by_external(body.group)
+        if not src or not dst or src.kind != "identity" or dst.kind != "group":
+            raise HTTPException(422, "Choose an identity and a group")
+        if any(e.type == "USER_MEMBER_OF_GROUP" and e.dst == dst.id for e in snap.out[src.id]):
+            raise HTTPException(409, "The identity already holds this membership")
+        target = dict(type="USER_MEMBER_OF_GROUP", src=node_json(src), dst=node_json(dst))
+        change = changes.create(
+            scope.conn,
+            scope,
+            "jit_grant",
+            target,
+            body.justification,
+            "jit",
+            parameters=dict(duration_minutes=body.duration_minutes),
+            idempotency_key=body.idempotency_key,
+        )
+        if change["status"] != "DRAFT":
+            return envelope(scope, change)
+        ops = operations_for(change)
+        result, source_versions = simulate(scope.conn, snap, scope.env_id, ops)
+        expires_at = datetime.now(timezone.utc) + APPROVAL_TTL
+        bound = binding(org, env, change, ops, source_versions, snap.version, expires_at)
+        sim = scope.conn.execute(
+            "INSERT INTO simulations(id,organization_id,environment_id,change_request_id,operations,"
+            "base_graph_version,source_versions,policy_version,parameters,result,digest,created_by,"
+            "expires_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+            (
+                uuid4(),
+                org,
+                env,
+                change["id"],
+                Jsonb(ops),
+                snap.version,
+                Jsonb(source_versions),
+                POLICY_VERSION,
+                Jsonb(change["parameters"]),
+                Jsonb(result),
+                bound,
+                scope.user_id,
+                expires_at,
+            ),
+        ).fetchone()
+        change = changes.transition(scope.conn, change, "SIMULATED")
+        scope.conn.execute(
+            "UPDATE change_requests SET simulation_id=%s, digest=%s WHERE id=%s",
+            (sim["id"], bound, change["id"]),
+        )
+        change = changes.transition(scope.conn, change, "IN_REVIEW")
+        scope.audit(
+            "jit.requested",
+            change["id"],
+            body.justification,
+            after=dict(status="IN_REVIEW", duration_minutes=body.duration_minutes, digest=bound),
+        )
+        return envelope(scope, dict(change, digest=bound, simulation_id=sim["id"]))
+
+
+@router.get(ENV + "/jit-grants")
+def jit_grants(org: UUID, env: UUID, request: Request):
+    with scoped(request, org, env, "findings:read") as scope:
+        rows = scope.conn.execute(
+            "SELECT g.*, c.target, c.justification, c.requester_id, "
+            "(g.status <> 'EXPIRED' AND g.expires_at <= now() - interval '5 minutes') AS overdue "
+            "FROM jit_grants g JOIN change_requests c ON c.id=g.change_request_id "
+            "WHERE g.environment_id=%s ORDER BY g.granted_at DESC LIMIT 100",
+            (env,),
+        ).fetchall()
+        pending = scope.conn.execute(
+            "SELECT * FROM change_requests WHERE environment_id=%s AND kind='jit_grant' "
+            "AND status IN ('IN_REVIEW','APPROVED','QUEUED','EXECUTING') ORDER BY created_at DESC",
+            (env,),
+        ).fetchall()
+        return envelope(
+            scope, dict(grants=rows, requests=pending, overdue=[r for r in rows if r["overdue"]])
+        )
+
+
+@router.put(ENV + "/sandbox/faults")
+def set_fault(org: UUID, env: UUID, body: FaultRequest, request: Request):
+    with scoped(request, org, env, "sandbox:seed") as scope:
+        if scope.environment["kind"] not in {"LAB", "SANDBOX"}:
+            raise HTTPException(409, "Fault injection exists only for sandbox connectors")
+        scope.conn.execute(
+            "INSERT INTO sandbox_faults(organization_id,environment_id,operation,mode,remaining) "
+            "VALUES(%s,%s,%s,%s,%s) ON CONFLICT (organization_id,environment_id,operation) "
+            "DO UPDATE SET mode=excluded.mode, remaining=excluded.remaining",
+            (org, env, body.operation, body.mode, body.remaining),
+        )
+        scope.audit(
+            "sandbox.fault_configured",
+            env,
+            "Sandbox connector fault injection for testing",
+            after=body.model_dump(),
+        )
+        return envelope(scope, body.model_dump())

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, Check, FlaskConical } from 'lucide-react';
 import { api, fmt, label, useResource } from '../api';
 import type { Ctx, Envelope, TwinEdge, TwinNode } from '../api';
@@ -71,13 +71,15 @@ export function ChangeRequests(ctx: Ctx) {
 type Detail = { change: Change; simulation: Simulation | null; history: { action: string; created_at: string; justification: string; after_state: Record<string, unknown> }[] };
 export function ChangeDetail({ ctx, id }: { ctx: Ctx; id: string }) {
   const detail = useResource<Envelope<Detail>>(`${ctx.base}/change-requests/${id}`);
+  const pending = ['QUEUED', 'EXECUTING', 'RECONCILIATION_REQUIRED'].includes(detail.data?.data.change.status || '');
+  useEffect(() => { if (!pending) return; const timer = setInterval(detail.reload, 2000); return () => clearInterval(timer); }, [pending, detail.reload]);
   const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [busy, setBusy] = useState(false);
   const act = async (fn: () => Promise<string>) => { setBusy(true); setError(''); setNotice(''); try { setNotice(await fn()); detail.reload(); } catch (e) { setError((e as Error).message); } finally { setBusy(false); } };
   return <><button className="secondary back" onClick={() => ctx.navigate('Change requests')}><ArrowLeft size={15}/>All change requests</button>
     <State {...detail}>{d => { const c = d.data.change; const current = STEPS.indexOf(c.status);
       return <><Panel title={`${label(c.kind)}: ${c.target.src.name} → ${c.target.dst.name}`} meta={<Tag tone={statusTone(c.status)}>{c.status}</Tag>}>
         <div className="steps">{STEPS.map((s, i) => <span key={s} className={i < current ? 'done' : i === current ? 'current' : ''}>{s}</span>)}{current < 0 && <span className="current">{c.status}</span>}</div>
-        <div className="pad"><p>{c.justification}</p><small className="block">Exact target: {label(c.target.type)} · {c.target.external_id || 'new relationship'} · environment {ctx.envKind} · origin {c.origin} · version {c.version}</small>
+        <div className="pad"><p>{c.justification}</p><small className="block mono" data-testid="change-id">Request {c.id}</small><small className="block">Exact target: {label(c.target.type)} · {c.target.external_id || 'new relationship'} · environment {ctx.envKind} · origin {c.origin} · version {c.version}</small>
           <div className="button-row">{ctx.can('change:simulate') && ['DRAFT', 'SIMULATED', 'STALE', 'IN_REVIEW'].includes(c.status) && <button className="secondary" disabled={busy} onClick={() => act(async () => { await api(`${ctx.base}/simulations`, 'POST', { change_request_id: c.id, expected_version: c.version }, ctx.session.csrf_token); return 'Simulation recorded and bound to this request.'; })}><FlaskConical size={15}/>{c.simulation_id ? 'Re-simulate' : 'Simulate'}</button>}
             <ChangeActions ctx={ctx} change={c} busy={busy} act={act}/></div>
           {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status"><Check size={16}/>{notice}</p>}</div></Panel>
@@ -85,5 +87,24 @@ export function ChangeDetail({ ctx, id }: { ctx: Ctx; id: string }) {
         <Panel title="Decision trail" meta={`${d.data.history.length} audit events`}>{d.data.history.map((h, i) => <div className="history-row" key={i}><strong>{h.action}</strong><small>{fmt(h.created_at)} · {h.justification} {h.after_state.status ? `→ ${String(h.after_state.status)}` : ''}</small></div>)}</Panel></>; }}</State></>;
 }
 
-// Extended in Phase 8 with submit / approve / execute.
-export function ChangeActions(_: { ctx: Ctx; change: Change; busy: boolean; act: (fn: () => Promise<string>) => void }) { return null; }
+export function ChangeActions({ ctx, change, busy, act }: { ctx: Ctx; change: Change; busy: boolean; act: (fn: () => Promise<string>) => void }) {
+  const [why, setWhy] = useState('');
+  const jit = change.kind === 'jit_grant';
+  const canApprove = ctx.can(jit ? 'jit:approve' : 'change:approve') && change.requester_id !== ctx.session.user.id;
+  const canExecute = ctx.can(jit ? 'jit:execute' : 'change:execute');
+  const mfaAge = Date.now() / 1000 - ctx.session.auth_time;
+  const mfa = (ctx.session.amr.includes('mfa') || (ctx.session.amr.includes('pwd') && ctx.session.amr.includes('otp'))) && mfaAge <= 300;
+  const csrf = ctx.session.csrf_token; const base = `${ctx.base}/change-requests/${change.id}`;
+  return <>
+    {change.status === 'SIMULATED' && ctx.can('change:propose') && <button className="primary" disabled={busy} onClick={() => act(async () => { await api(`${base}/submit`, 'POST', { expected_version: change.version }, csrf); return 'Submitted for independent approval.'; })}>Submit for approval</button>}
+    {change.status === 'IN_REVIEW' && canApprove && <div className="approval-box"><p><strong>Approve this exact proposal</strong> · digest <code className="mono">{change.digest}</code></p>
+      {!mfa && <Warning>Approval requires MFA verified within the last 5 minutes. Sign out and sign in again with your one-time code.</Warning>}
+      <label>Approval justification<textarea minLength={8} value={why} onChange={e => setWhy(e.target.value)} placeholder="Reference the simulation evidence you reviewed."/></label>
+      <div className="button-row"><button className="primary" disabled={busy || why.length < 8} onClick={() => act(async () => { await api(`${base}/decision`, 'POST', { digest: change.digest, decision: 'APPROVE', justification: why }, csrf); return 'Approved. Execution is a separate action by another operator.'; })}>Approve exact digest</button>
+        <button className="secondary" disabled={busy || why.length < 8} onClick={() => act(async () => { await api(`${base}/decision`, 'POST', { digest: change.digest, decision: 'REJECT', justification: why }, csrf); return 'Rejected.'; })}>Reject</button></div></div>}
+    {change.status === 'IN_REVIEW' && change.requester_id === ctx.session.user.id && <small>Awaiting an independent approver (you requested this change).</small>}
+    {change.status === 'APPROVED' && canExecute && <button className="primary" disabled={busy} onClick={() => act(async () => { await api(`${base}/execute`, 'POST', { digest: change.digest }, csrf); return 'Queued for sandbox execution. Status updates when the source confirms.'; })}>Execute in {ctx.envKind} sandbox</button>}
+    {['QUEUED', 'EXECUTING', 'RECONCILIATION_REQUIRED'].includes(change.status) && <small>Pending is not success: waiting for the worker to confirm the source result (updates automatically).</small>}
+    {['DRAFT', 'SIMULATED', 'STALE'].includes(change.status) && change.requester_id === ctx.session.user.id && <button className="secondary" disabled={busy} onClick={() => act(async () => { await api(`${base}/cancel`, 'POST', { expected_version: change.version }, csrf); return 'Cancelled.'; })}>Cancel request</button>}
+  </>;
+}

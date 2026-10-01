@@ -37,11 +37,33 @@ def parse_time(value):
 
 
 def seed_sandbox(conn, environment, alternate_path=False):
-    """Load SYNTHETIC fixture objects into the sandbox source. Never touches the twin."""
+    """Reset the sandbox source to the SYNTHETIC fixture baseline. Never touches the twin.
+
+    Relationships that are not part of the fixture (e.g. executed changes or JIT grants) are
+    closed at the source; the next sync records that as history rather than deleting evidence.
+    """
     if environment["kind"] not in {"LAB", "SANDBOX"}:
         raise PermissionError("Synthetic data may only be loaded into LAB or SANDBOX environments")
     changed = 0
-    for obj in contoso.build(alternate_path=alternate_path):
+    objects = contoso.build(alternate_path=alternate_path)
+    wanted = {obj["id"] for obj in objects}
+    extras = conn.execute(
+        "SELECT object_id, body FROM sandbox_objects WHERE environment_id=%s AND NOT deleted "
+        "AND object_type='relationship'",
+        (environment["id"],),
+    ).fetchall()
+    for row in extras:
+        if row["object_id"] in wanted:
+            continue
+        version = conn.execute("SELECT nextval('sandbox_version_seq') AS v").fetchone()["v"]
+        body = dict(row["body"], valid_to=datetime.now(timezone.utc).isoformat())
+        conn.execute(
+            "UPDATE sandbox_objects SET body=%s, deleted=true, version=%s, updated_at=now() "
+            "WHERE environment_id=%s AND object_id=%s",
+            (Jsonb(body), version, environment["id"], row["object_id"]),
+        )
+        changed += 1
+    for obj in objects:
         row = conn.execute(
             "SELECT body, deleted FROM sandbox_objects WHERE environment_id=%s AND object_id=%s",
             (environment["id"], obj["id"]),
@@ -105,13 +127,14 @@ class Ingestor:
     def observe(self, row):
         payload = dict(row["body"], deleted=row["deleted"])
         fingerprint = digest(canonical(payload))
-        existing = self.conn.execute(
-            "SELECT id FROM observations WHERE environment_id=%s AND source=%s AND external_id=%s "
-            "AND digest=%s",
-            (self.env_id, SOURCE, row["object_id"], fingerprint),
+        # Compare with the latest observation only: an object may return to an earlier state.
+        latest = self.conn.execute(
+            "SELECT digest FROM observations WHERE organization_id=%s AND environment_id=%s "
+            "AND source=%s AND external_id=%s ORDER BY received_at DESC LIMIT 1",
+            (self.org, self.env_id, SOURCE, row["object_id"]),
         ).fetchone()
         self.counts["observed"] += 1
-        if existing:
+        if latest and latest["digest"] == fingerprint:
             self.counts["unchanged"] += 1
             return None
         return payload, fingerprint

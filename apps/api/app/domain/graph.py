@@ -108,6 +108,9 @@ def load(conn, environment_id, effective_at=None, known_at=None) -> Snapshot:
         (environment_id, k, k, t, t),
     ).fetchall()
     for r in rows:
+        expires = (r["attributes"] or {}).get("expires_at")
+        if expires and datetime.fromisoformat(expires) <= t:
+            continue  # source-native TTL: an expired grant is not effective even before revocation
         snapshot.edges.append(
             Edge(
                 str(r["id"]),
