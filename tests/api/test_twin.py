@@ -5,31 +5,9 @@ import time
 from datetime import datetime, timezone
 
 import psycopg
-from psycopg.types.json import Jsonb
 
 from tests.api.conftest import as_user
-
-MIGRATION = os.environ.get("MIGRATION_DATABASE_URL")
-
-
-def source_update(env, object_id, change=None, delete_row=False):
-    with psycopg.connect(MIGRATION) as conn:
-        if delete_row:
-            conn.execute(
-                "DELETE FROM sandbox_objects WHERE environment_id=%s AND object_id=%s",
-                (env, object_id),
-            )
-            return
-        body = conn.execute(
-            "SELECT body FROM sandbox_objects WHERE environment_id=%s AND object_id=%s",
-            (env, object_id),
-        ).fetchone()[0]
-        body, deleted = change(body)
-        conn.execute(
-            "UPDATE sandbox_objects SET body=%s, deleted=%s, version=nextval('sandbox_version_seq') "
-            "WHERE environment_id=%s AND object_id=%s",
-            (Jsonb(body), deleted, env, object_id),
-        )
+from tests.api.support import MIGRATION, source_update
 
 
 def test_deterministic_import_and_replay_is_idempotent(client, twin):
