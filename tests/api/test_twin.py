@@ -6,8 +6,11 @@ from datetime import datetime, timezone
 
 import psycopg
 
+from packages.fixtures.contoso import build
 from tests.api.conftest import as_user
 from tests.api.support import MIGRATION, source_update
+
+FIXTURE = len(build())
 
 
 def test_deterministic_import_and_replay_is_idempotent(client, twin):
@@ -16,10 +19,10 @@ def test_deterministic_import_and_replay_is_idempotent(client, twin):
     first = runs[0]
     assert first["status"] == "SUCCEEDED" and first["rejected"] == 0
     assert first["coverage"] == "complete_authoritative"
-    assert first["created"] == 434 and first["observed"] == 434
+    assert first["created"] == FIXTURE and first["observed"] == FIXTURE
     again = client.post(base + "/connectors/sandbox/sync", json={"mode": "full"}, headers=headers)
     body = again.json()["data"]
-    assert body["observed"] == 434 and body["unchanged"] == 434 and body["created"] == 0
+    assert body["observed"] == FIXTURE and body["unchanged"] == FIXTURE and body["created"] == 0
     assert body["tombstoned"] == 0
     incremental = client.post(base + "/connectors/sandbox/sync", json={}, headers=headers).json()
     assert incremental["data"]["observed"] == 0

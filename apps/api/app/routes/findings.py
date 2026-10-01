@@ -6,6 +6,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from ..domain.access import effective_access
+from ..domain.agents import AGENT_RULES, activity, agent_profile
 from ..domain.exposure import attack_paths
 from ..domain.findings import RULES_VERSION, all_findings, is_privileged, machine_context, timeline
 from ..domain.graph import node_json
@@ -136,3 +137,48 @@ def machines(
                 )
             )
         return envelope(scope, rows, snapshot=snap)
+
+
+@router.get(ENV + "/agents")
+def agents(
+    org: UUID,
+    env: UUID,
+    request: Request,
+    tool: str | None = Query(None, max_length=80),
+    data_classification: str | None = Query(None, max_length=80),
+    effective_at: datetime | None = None,
+):
+    with scoped(request, org, env, "identity:read") as scope:
+        snap = snapshot_for(scope, effective_at)
+        rows = []
+        for node in sorted(snap.nodes.values(), key=lambda n: n.name):
+            if node.kind != "identity" or node.subtype != "agent":
+                continue
+            profile = agent_profile(snap, scope.conn, node.id)
+            profile.pop("_access")
+            if tool and tool not in profile["effective"]["tools"]:
+                continue
+            if data_classification and data_classification not in profile["effective"]["data"]:
+                continue
+            rows.append(profile)
+        return envelope(scope, rows, snapshot=snap, rules_version=AGENT_RULES)
+
+
+@router.get(ENV + "/agents/{node_id}/activity")
+def agent_activity(
+    org: UUID,
+    env: UUID,
+    node_id: str,
+    request: Request,
+    start: datetime = Query(..., alias="from"),
+    end: datetime = Query(..., alias="to"),
+):
+    with scoped(request, org, env, "history:read") as scope:
+        snap = snapshot_for(scope)
+        node = resolve(snap, node_id)
+        if node.subtype != "agent":
+            raise HTTPException(422, "Activity queries are for registered agents")
+        try:
+            return envelope(scope, activity(scope.conn, node.id, start, end))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from None

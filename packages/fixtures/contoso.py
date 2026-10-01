@@ -252,6 +252,8 @@ AGENTS = [
             "max_privilege": "read customer records; send email drafts",
             "credential_scope": "crm.read email.send",
             "expires_at": ts("2026-12-31"),
+            "allowed_tools": ["email.send", "crm.read"],
+            "allowed_data": ["customer-data"],
             "prohibited_data": ["payroll", "credentials"],
         },
     ),
@@ -266,6 +268,8 @@ AGENTS = [
             "max_privilege": "read repositories; comment",
             "credential_scope": "repo.read pr.comment",
             "expires_at": ts("2027-03-31"),
+            "allowed_tools": ["repo.read", "pr.comment"],
+            "allowed_data": ["source-code"],
             "prohibited_data": ["customer-data"],
         },
     ),
@@ -279,6 +283,13 @@ APPLICATIONS = [
     ("app-backup", "Backup Vault", "high"),
     ("app-directory", "Directory Admin Portal", "critical"),
 ]
+CLASSIFICATION = {
+    "res-payroll": "payroll",
+    "res-ledger": "financial",
+    "res-customer-data": "customer-data",
+    "res-repos": "source-code",
+    "res-backups": "backups",
+}
 RESOURCES = [
     ("res-payroll", "Payroll · SIMULATED", "critical", "database"),
     ("res-ledger", "General Ledger", "high", "database"),
@@ -542,7 +553,12 @@ def build(alternate_path: bool = False) -> list[dict]:
                 "resource",
                 name,
                 subtype,
-                dict(sensitivity=sensitivity, owner=owner, simulated=True),
+                dict(
+                    sensitivity=sensitivity,
+                    owner=owner,
+                    simulated=True,
+                    data_classification=CLASSIFICATION[oid],
+                ),
             )
         )
     for oid, name in TOOLS:
@@ -1016,6 +1032,9 @@ def build(alternate_path: bool = False) -> list[dict]:
         ("cov-crm", "app-crm", "2026-01-01", "2026-09-30", "complete"),
         ("cov-directory", "app-directory", "2026-01-01", "2026-09-30", "complete"),
         ("cov-backup", "app-backup", "2026-05-01", "2026-09-30", "complete"),
+        ("cov-customer-data", "res-customer-data", "2026-03-01", "2026-09-30", "complete"),
+        ("cov-repos", "res-repos", "2026-03-01", "2026-09-30", "complete"),
+        ("cov-email-tool", "tool-email-send", "2026-03-01", "2026-09-30", "complete"),
     ]:
         add(
             dict(
@@ -1037,6 +1056,10 @@ def build(alternate_path: bool = False) -> list[dict]:
         usage.append(("sofia", "app-crm", day + timedelta(hours=1)))
         if day < datetime(2026, 6, 1, tzinfo=timezone.utc):
             usage.append(("erick", "app-erp", day + timedelta(hours=3)))
+        if day >= datetime(2026, 3, 1, tzinfo=timezone.utc):
+            usage.append(("agent-support", "res-customer-data", day + timedelta(hours=6)))
+            usage.append(("agent-support", "tool-email-send", day + timedelta(hours=7)))
+            usage.append(("agent-reviewer", "res-repos", day + timedelta(hours=8)))
         if week % 4 == 0:
             usage.append(("fatima", "app-directory", day + timedelta(hours=4)))
             usage.append(("maria", "app-backup", day + timedelta(hours=5)))
