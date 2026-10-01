@@ -32,6 +32,7 @@ def tenant():
             ("operator", ["operator"]),
             ("approver2", ["approver"]),
             ("learner", ["learner"]),
+            ("learner2", ["learner"]),
         ]:
             uid, token = str(uuid4()), secrets.token_urlsafe(32)
             csrf = digest("csrf:" + token)

@@ -16,7 +16,7 @@ from ..domain.types import validate
 from ..jsonutil import dumps
 from ..jsonutil import jsonb as Jsonb
 from ..scope import envelope, scoped
-from ..security import capabilities, digest, require_recent_mfa
+from ..security import digest, require_recent_mfa
 from .twin import ENV, snapshot_for
 
 router = APIRouter(prefix="/api/v1/organizations/{org}")
@@ -357,7 +357,7 @@ def submit(org: UUID, env: UUID, change_id: UUID, body: Transition, request: Req
 def decide_change(org: UUID, env: UUID, change_id: UUID, body: ApprovalRequest, request: Request):
     with scoped(request, org, env, "overview:read") as scope:
         change = load_change(scope, change_id, lock=True)
-        if capability_for(change, "approve") not in capabilities(scope.member["roles"]):
+        if capability_for(change, "approve") not in scope.caps:
             raise HTTPException(403, "Your role does not allow this action")
         require_mfa(scope)
         if change["requester_id"] == scope.user_id:
@@ -416,7 +416,7 @@ def execute(org: UUID, env: UUID, change_id: UUID, body: ExecuteRequest, request
                 409, "Execution is limited to sandbox connectors; no production adapter is approved"
             )
         change = load_change(scope, change_id, lock=True)
-        if capability_for(change, "execute") not in capabilities(scope.member["roles"]):
+        if capability_for(change, "execute") not in scope.caps:
             raise HTTPException(403, "Your role does not allow this action")
         require_mfa(scope)
         if change["status"] != "APPROVED":

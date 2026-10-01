@@ -54,7 +54,9 @@ def environments(org: UUID, request: Request):
             "SELECT e.id, e.name, e.kind, "
             "(SELECT max(finished_at) FROM sync_runs s WHERE s.environment_id=e.id "
             " AND s.status IN ('SUCCEEDED','PARTIAL')) AS last_sync "
-            "FROM environments e ORDER BY e.kind, e.name"
+            "FROM environments e WHERE e.lab_learner IS NULL OR e.lab_learner=%s OR %s "
+            "ORDER BY e.lab_learner NULLS FIRST, e.kind, e.name",
+            (scope.user_id, "lab:manage" in scope.caps),
         ).fetchall()
         return envelope(scope, rows)
 
@@ -257,3 +259,10 @@ def applications(org: UUID, env: UUID, request: Request):
             )
         rows.sort(key=lambda r: (r["kind"], r["name"]))
         return envelope(scope, rows, snapshot=snap)
+
+
+@router.get(ENV + "/capabilities")
+def environment_capabilities(org: UUID, env: UUID, request: Request):
+    """Effective capabilities in this environment (learners gain analysis rights only in their lab)."""
+    with scoped(request, org, env, "overview:read") as scope:
+        return envelope(scope, sorted(scope.caps))

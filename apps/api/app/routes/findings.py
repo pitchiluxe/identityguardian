@@ -11,7 +11,6 @@ from ..domain.exposure import attack_paths
 from ..domain.findings import RULES_VERSION, all_findings, is_privileged, machine_context, timeline
 from ..domain.graph import node_json
 from ..scope import envelope, scoped
-from ..security import capabilities
 from .twin import ENV, resolve, snapshot_for
 
 router = APIRouter(prefix="/api/v1/organizations/{org}")
@@ -96,7 +95,7 @@ def machines(
     with scoped(request, org, env, "identity:read") as scope:
         snap = snapshot_for(scope)
         findings_by_identity: dict = {}
-        if "findings:read" in capabilities(scope.member["roles"]):
+        if "findings:read" in scope.caps:
             for f in all_findings(snap, scope.conn, scope.env_id):
                 findings_by_identity.setdefault(f["identity"]["id"], []).append(
                     dict(key=f["key"], rule=f["rule"], severity=f["severity"], title=f["title"])

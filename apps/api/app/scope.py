@@ -9,6 +9,7 @@ from fastapi import HTTPException, Request
 from psycopg.types.json import Jsonb
 
 from .auth import authenticate, membership
+from .security import capabilities
 
 
 @dataclass
@@ -27,6 +28,10 @@ class Scope:
     @property
     def user_id(self):
         return self.user["user_id"]
+
+    @property
+    def caps(self):
+        return self.member["capabilities"]
 
     def audit(
         self,
@@ -58,16 +63,38 @@ class Scope:
         )
 
 
+# Inside their own lab attempt environment a learner may explore like an analyst. These
+# capabilities never apply outside that environment.
+LAB_CAPABILITIES = {
+    "overview:read",
+    "identity:read",
+    "graph:read",
+    "access:read",
+    "findings:read",
+    "history:read",
+}
+
+
 @contextmanager
 def scoped(request: Request, org: UUID, env: UUID | None, capability: str):
     user = authenticate(request)
     with request.app.state.db.transaction(org) as conn:
-        member = membership(conn, user["user_id"], capability)
+        member = dict(membership(conn, user["user_id"]))
+        granted = capabilities(member["roles"])
         environment = None
         if env is not None:
             environment = conn.execute("SELECT * FROM environments WHERE id=%s", (env,)).fetchone()
             if not environment:
                 raise HTTPException(404, "Environment not found")
+            learner = environment.get("lab_learner")
+            if learner is not None:
+                if learner == user["user_id"]:
+                    granted = granted | LAB_CAPABILITIES
+                elif "lab:manage" not in granted:
+                    raise HTTPException(404, "Environment not found")  # no existence leak
+        if capability not in granted:
+            raise HTTPException(403, "Your role does not allow this action")
+        member["capabilities"] = granted
         yield Scope(conn, user, member, org, environment, request.state.correlation)
 
 

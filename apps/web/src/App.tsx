@@ -42,15 +42,17 @@ export function App() {
     return () => { current = false; }; }, [org, revision]);
   const envs = useResource<Envelope<Environment[]>>(org && overview ? `/organizations/${org}/environments` : null, [revision]);
   useEffect(() => { const list = envs.data?.data || []; if (list.length && !list.some(e => e.id === env)) setEnv(list[0].id); }, [envs.data]);
+  const envCapabilities = useResource<Envelope<string[]>>(org && env ? `/organizations/${org}/environments/${env}/capabilities` : null, [revision]);
   const navigate = (name: string, next: Record<string, string> = {}) => { setPage(name); setParams(next); setMenu(false); window.scrollTo?.(0, 0); };
   const signOut = async () => { try { await api('/auth/logout', 'POST', undefined, session?.csrf_token); setSession(null); setOverview(null); } catch (e) { setError((e as Error).message); } };
   if (loading) return <main className="loading"><ShieldCheck size={32}/><p>Opening your workspace…</p></main>;
   if (!session) return <Landing error={error}/>;
 
-  const can = (capability: string) => overview?.capabilities.includes(capability) ?? false;
+  const envCaps = envCapabilities.data?.data;
+  const can = (capability: string) => (envCaps ?? overview?.capabilities ?? []).includes(capability);
   const environment = envs.data?.data.find(e => e.id === env);
   const item = navigation.find(([name]) => name === page) || navigation[0];
-  const ctx: Ctx = { org, env, session, can, base: `/organizations/${org}/environments/${env}`, envKind: environment?.kind || '', navigate, params };
+  const ctx: Ctx = { org, env, session, can, base: `/organizations/${org}/environments/${env}`, envKind: environment?.kind || '', navigate, params, selectEnv: (id: string) => { setEnv(id); setRevision(v => v + 1); } };
   const renderer = PAGES[page];
   let body: ReactNode;
   if (!org) body = <Empty title="No organization assigned" text="Ask your platform administrator to provision your organization membership."/>;

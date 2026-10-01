@@ -40,7 +40,7 @@ export function useResource<T>(path: string | null, deps: unknown[] = []) {
   return { data, error, loading, reload };
 }
 
-export type Ctx = { org: string; env: string; session: Session; can: (capability: string) => boolean; base: string; envKind: string; navigate: (page: string, params?: Record<string, string>) => void; params: Record<string, string> };
+export type Ctx = { org: string; env: string; session: Session; can: (capability: string) => boolean; base: string; envKind: string; navigate: (page: string, params?: Record<string, string>) => void; params: Record<string, string>; selectEnv: (id: string) => void };
 
 export const fmt = (value: unknown) => value === null || value === undefined || value === '' ? '—' : typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) ? new Date(value).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : typeof value === 'object' ? JSON.stringify(value) : String(value);
 export const label = (value: string) => value.replaceAll('_', ' ').toLowerCase().replace(/^./, c => c.toUpperCase());

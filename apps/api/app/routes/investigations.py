@@ -13,7 +13,7 @@ from ..ai.validate import SCHEMA, prompt, validate
 from ..jsonutil import dumps
 from ..jsonutil import jsonb as Jsonb
 from ..scope import envelope, scoped
-from ..security import capabilities, digest
+from ..security import digest
 from .twin import ENV, snapshot_for
 
 router = APIRouter(prefix="/api/v1/organizations/{org}")
@@ -99,7 +99,7 @@ def investigate(org: UUID, env: UUID, body: Question, request: Request):
             store(scope, result, {"clarification": parsed.reason}, {})
             return envelope(scope, result)
         needed = CAPABILITY[parsed.name]
-        if needed not in capabilities(scope.member["roles"]):
+        if needed not in scope.caps:
             raise HTTPException(403, f"Your role cannot run '{parsed.name}' investigations")
         bundle = plan(parsed, snap, scope.conn, scope.env_id).as_dict()
         intent = dict(name=parsed.name, params=parsed.params)
