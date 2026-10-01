@@ -8,6 +8,7 @@ import { Administration, AuditLog } from './Admin';
 import { ChangeRequests, WhatIf } from './Changes';
 import { Integrations } from './Integrations';
 import { JitAccess } from './Jit';
+import { Machines } from './Machines';
 import { AttackPaths } from './Paths';
 import { Radar } from './Radar';
 import { Reviews } from './Reviews';
@@ -47,6 +48,7 @@ export const PAGES: Record<string, PageDef> = {
   'What-if simulator': { subtitle: 'Immutable overlays: residual routes, dependencies, lockouts and unknowns.', capability: 'access:read', render: ctx => <WhatIf {...ctx}/> },
   'Change requests': { subtitle: 'Exact proposals: simulate, independently approve, execute in the sandbox.', capability: 'findings:read', render: ctx => <ChangeRequests {...ctx}/> },
   'JIT access': { subtitle: 'Bounded temporary access with independent approval, native expiry and revocation tracking.', capability: 'findings:read', render: ctx => <JitAccess {...ctx}/> },
+  'Machine identities': { subtitle: 'Owners, credential lifecycle metadata, dependencies and privileged access.', capability: 'identity:read', render: ctx => <Machines {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Sandbox connector, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
   Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <Administration org={ctx.org} session={ctx.session} can={ctx.can}/> },

@@ -15,7 +15,7 @@ from uuid import uuid4
 from ..jsonutil import jsonb as Jsonb
 from ..security import capabilities
 from . import connector
-from .changes import transition
+from .changes import transition, versions_current
 from .ingest import run_sync
 
 OVERDUE_GRACE = timedelta(minutes=5)
@@ -54,6 +54,8 @@ def audit(
 def source_object(change):
     if change["kind"] == "remove_relationship":
         return change["target"]["external_id"]
+    if change["kind"] == "rotate_credential":
+        return change["target"]["credential"]["external_id"]
     return f"jit-{change['id']}" if change["kind"] == "jit_grant" else f"add-{change['id']}"
 
 
@@ -91,14 +93,8 @@ def recheck(conn, change, execution):
     sim = conn.execute(
         "SELECT source_versions FROM simulations WHERE id=%s", (change["simulation_id"],)
     ).fetchone()
-    for rel_id, revision in (sim["source_versions"] or {}).items():
-        current = conn.execute(
-            "SELECT id FROM relationship_revisions WHERE relationship_id=%s AND recorded_to IS NULL "
-            "AND (valid_to IS NULL OR valid_to>now()) ORDER BY valid_from DESC LIMIT 1",
-            (rel_id,),
-        ).fetchone()
-        if not current or str(current["id"]) != revision:
-            return False, "STALE", "Target relationship changed at the source since simulation"
+    if not versions_current(conn, sim["source_versions"]):
+        return False, "STALE", "Target changed at the source since simulation"
     return True, None, None
 
 
@@ -166,7 +162,9 @@ def execute_change(db, org, change_id):
         ).fetchone()
     with db.transaction(org) as conn:
         operation = (
-            "remove_relationship" if change["kind"] == "remove_relationship" else "add_relationship"
+            "add_relationship"
+            if change["kind"] in {"add_relationship", "jit_grant"}
+            else "remove_relationship"
         )
         fault = connector.consume_fault(conn, environment["id"], operation)
     object_id = source_object(change)
@@ -174,6 +172,10 @@ def execute_change(db, org, change_id):
         with db.transaction(org) as conn:
             if change["kind"] == "remove_relationship":
                 result = connector.remove_relationship(
+                    conn, environment["id"], object_id, fault=fault
+                )
+            elif change["kind"] == "rotate_credential":
+                result = connector.rotate_credential(
                     conn, environment["id"], object_id, fault=fault
                 )
             else:
@@ -250,7 +252,14 @@ def execute_change(db, org, change_id):
 
 def confirm(db, org, change, execution, object_id, result=None):
     with db.transaction(org) as conn:
-        readback = connector.read_back(conn, change["environment_id"], object_id)
+        if change["kind"] == "rotate_credential":
+            dispatched = (result or {}).get("effective_at")
+            since = datetime.fromisoformat(dispatched) if dispatched else execution["created_at"]
+            readback = connector.credential_rotated_since(
+                conn, change["environment_id"], object_id, since - timedelta(seconds=1)
+            )
+        else:
+            readback = connector.read_back(conn, change["environment_id"], object_id)
         expected_present = change["kind"] != "remove_relationship"
         if readback is None or readback["present"] != expected_present:
             _set(

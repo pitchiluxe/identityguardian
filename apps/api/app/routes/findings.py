@@ -5,9 +5,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ..domain.access import effective_access
 from ..domain.exposure import attack_paths
-from ..domain.findings import RULES_VERSION, all_findings, timeline
+from ..domain.findings import RULES_VERSION, all_findings, is_privileged, machine_context, timeline
+from ..domain.graph import node_json
 from ..scope import envelope, scoped
+from ..security import capabilities
 from .twin import ENV, resolve, snapshot_for
 
 router = APIRouter(prefix="/api/v1/organizations/{org}")
@@ -80,3 +83,56 @@ def exposure_paths(
             completeness="complete" if result["complete"] else "partial",
             evidence_ids=[e for p in result["paths"] for e in p["evidence_ids"]],
         )
+
+
+@router.get(ENV + "/machines")
+def machines(
+    org: UUID,
+    env: UUID,
+    request: Request,
+    subtype: str = Query("machine", pattern="^(machine|agent)$"),
+):
+    with scoped(request, org, env, "identity:read") as scope:
+        snap = snapshot_for(scope)
+        findings_by_identity: dict = {}
+        if "findings:read" in capabilities(scope.member["roles"]):
+            for f in all_findings(snap, scope.conn, scope.env_id):
+                findings_by_identity.setdefault(f["identity"]["id"], []).append(
+                    dict(key=f["key"], rule=f["rule"], severity=f["severity"], title=f["title"])
+                )
+        rows = []
+        for node in sorted(snap.nodes.values(), key=lambda n: n.name):
+            if node.kind != "identity" or node.subtype != subtype:
+                continue
+            _, owners, credentials, dependents, direct = machine_context(snap, node.id)
+            access = effective_access(snap, node.id, scope.conn)
+            last = scope.conn.execute(
+                "SELECT max(occurred_at) AS last FROM usage_events WHERE identity_node=%s",
+                (node.id,),
+            ).fetchone()["last"]
+            rows.append(
+                dict(
+                    identity=node_json(node),
+                    owners=[node_json(o) for o in owners],
+                    credentials=[
+                        dict(node_json(c), relationship_evidence=e.observation_id)
+                        for c, e in credentials
+                    ],
+                    dependents=[node_json(d) for d in dependents],
+                    direct_access=[node_json(d) for d in direct],
+                    entitlements=len(access["entries"]),
+                    privileged=[
+                        (e["resource"] or e["permission"])["name"]
+                        for e in access["entries"]
+                        if is_privileged(e)
+                    ],
+                    tools=[
+                        node_json(snap.nodes[e.dst])
+                        for e in snap.out[node.id]
+                        if e.type == "AI_AGENT_USES_TOOL"
+                    ],
+                    last_observed_use=last,
+                    findings=findings_by_identity.get(node.id, []),
+                )
+            )
+        return envelope(scope, rows, snapshot=snap)

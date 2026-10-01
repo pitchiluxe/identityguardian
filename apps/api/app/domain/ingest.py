@@ -28,6 +28,37 @@ CAPABILITIES = {
 }
 
 
+# Field names that may carry secret material. Values are dropped before anything is stored;
+# only the field path is kept so the redaction itself is visible evidence.
+SENSITIVE_KEYS = (
+    "password",
+    "secret_value",
+    "client_secret",
+    "private_key",
+    "token_value",
+    "access_token",
+    "refresh_token",
+    "api_key_value",
+    "otp_seed",
+)
+
+
+def sanitize(value, path="", removed=None):
+    removed = [] if removed is None else removed
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            here = f"{path}.{key}" if path else key
+            if any(s in key.lower() for s in SENSITIVE_KEYS):
+                removed.append(here)
+                continue
+            clean[key] = sanitize(item, here, removed)[0]
+        return clean, removed
+    if isinstance(value, list):
+        return [sanitize(item, f"{path}[{i}]", removed)[0] for i, item in enumerate(value)], removed
+    return value, removed
+
+
 def canonical(value) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
@@ -125,7 +156,9 @@ class Ingestor:
         return self.node_cache[external_id]
 
     def observe(self, row):
-        payload = dict(row["body"], deleted=row["deleted"])
+        payload, removed = sanitize(dict(row["body"], deleted=row["deleted"]))
+        if removed:
+            payload["_redacted_fields"] = sorted(removed)
         fingerprint = digest(canonical(payload))
         # Compare with the latest observation only: an object may return to an earlier state.
         latest = self.conn.execute(

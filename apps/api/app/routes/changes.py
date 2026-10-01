@@ -23,8 +23,9 @@ router = APIRouter(prefix="/api/v1/organizations/{org}")
 
 class Operation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    op: Literal["remove_relationship", "add_relationship"]
+    op: Literal["remove_relationship", "add_relationship", "rotate_credential"]
     relationship: str | None = Field(None, max_length=120)
+    credential: str | None = Field(None, max_length=120)
     type: str | None = Field(None, max_length=60)
     src: str | None = Field(None, max_length=120)
     dst: str | None = Field(None, max_length=120)
@@ -40,9 +41,12 @@ class SimulationRequest(BaseModel):
 
 class ProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["remove_relationship", "add_relationship"]
+    kind: Literal["remove_relationship", "add_relationship", "rotate_credential"]
     relationship: str | None = Field(None, max_length=120)
-    type: Literal["USER_MEMBER_OF_GROUP", "USER_HAS_ROLE"] | None = None
+    credential: str | None = Field(None, max_length=120)
+    type: Literal["USER_MEMBER_OF_GROUP", "USER_HAS_ROLE", "USER_OWNS_SERVICE_ACCOUNT"] | None = (
+        None
+    )
     src: str | None = Field(None, max_length=120)
     dst: str | None = Field(None, max_length=120)
     justification: str = Field(min_length=8, max_length=2000)
@@ -53,6 +57,8 @@ def operations_for(change):
     target = change["target"]
     if change["kind"] == "remove_relationship":
         return [dict(op="remove_relationship", relationship=target["relationship_id"])]
+    if change["kind"] == "rotate_credential":
+        return [dict(op="rotate_credential", credential=target["credential"]["external_id"])]
     params = change["parameters"]
     return [
         dict(
@@ -179,6 +185,20 @@ def propose(org: UUID, env: UUID, body: ProposalRequest, request: Request):
             if not row:
                 raise HTTPException(404, "Relationship not found")
             target = changes.relationship_target(snap, scope.conn, row["id"])
+        elif body.kind == "rotate_credential":
+            credential = snap.by_external(body.credential or "")
+            if not credential or credential.kind != "credential":
+                raise HTTPException(422, "Choose a credential")
+            holder = next(
+                (snap.nodes[e.src] for e in snap.inc[credential.id] if e.type == "HAS_CREDENTIAL"),
+                None,
+            )
+            target = dict(
+                type="CREDENTIAL_ROTATION",
+                credential=node_json(credential),
+                src=node_json(holder) if holder else node_json(credential),
+                dst=node_json(credential),
+            )
         else:
             src, dst = snap.by_external(body.src or ""), snap.by_external(body.dst or "")
             if not src or not dst or not body.type:
@@ -272,15 +292,7 @@ def simulation_current(scope, change):
     ).fetchone()
     if not sim or sim["expires_at"] <= datetime.now(timezone.utc):
         return None
-    for rel_id, revision in (sim["source_versions"] or {}).items():
-        current = scope.conn.execute(
-            "SELECT id FROM relationship_revisions WHERE relationship_id=%s AND recorded_to IS NULL "
-            "AND (valid_to IS NULL OR valid_to>now()) ORDER BY valid_from DESC LIMIT 1",
-            (rel_id,),
-        ).fetchone()
-        if not current or str(current["id"]) != revision:
-            return False
-    return sim
+    return sim if changes.versions_current(scope.conn, sim["source_versions"]) else False
 
 
 @router.post(ENV + "/change-requests/{change_id}/submit")

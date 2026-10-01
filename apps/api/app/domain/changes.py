@@ -128,3 +128,29 @@ def transition(conn, change, new_status, expected_version=None):
 
 def _conflict():
     raise HTTPException(409, "Request changed concurrently; refresh and review again")
+
+
+def versions_current(conn, source_versions) -> bool:
+    """True when every bound source version is still the current one.
+
+    Keys are relationship IDs (bound to their current revision ID) or ``credential:<node id>``
+    (bound to the credential's current ``rotated_at``).
+    """
+    for key, bound in (source_versions or {}).items():
+        if key.startswith("credential:"):
+            row = conn.execute(
+                "SELECT attributes->>'rotated_at' AS rotated FROM node_revisions WHERE node_id=%s "
+                "AND recorded_to IS NULL ORDER BY valid_from DESC LIMIT 1",
+                (key.split(":", 1)[1],),
+            ).fetchone()
+            if not row or str(row["rotated"]) != bound:
+                return False
+            continue
+        row = conn.execute(
+            "SELECT id FROM relationship_revisions WHERE relationship_id=%s AND recorded_to IS NULL "
+            "AND (valid_to IS NULL OR valid_to>now()) ORDER BY valid_from DESC LIMIT 1",
+            (key,),
+        ).fetchone()
+        if not row or str(row["id"]) != bound:
+            return False
+    return True

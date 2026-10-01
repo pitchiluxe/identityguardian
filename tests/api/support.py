@@ -60,3 +60,48 @@ def sync(client, twin, mode="incremental"):
     )
     assert response.status_code == 200, response.text
     return response.json()["data"]
+
+
+def run_change(client, twin, worker, proposal, finish=True):
+    """Propose -> simulate -> submit -> independent approval -> execution -> worker."""
+    from uuid import uuid4
+
+    from apps.worker.main import process_one
+    from tests.api.conftest import as_user
+
+    def post(who, path, body, status):
+        headers = as_user(client, twin["people"], who)
+        response = client.post(twin["base"] + path, json=body, headers=headers)
+        assert response.status_code == status, response.text
+        return response.json()["data"]
+
+    def current(change_id):
+        as_user(client, twin["people"], "investigator")
+        return client.get(twin["base"] + f"/change-requests/{change_id}").json()["data"]
+
+    created = post(
+        "investigator", "/change-requests", dict(proposal, idempotency_key=str(uuid4())), 201
+    )
+    simulation = post("investigator", "/simulations", {"change_request_id": created["id"]}, 201)
+    change = current(created["id"])["change"]
+    post(
+        "investigator",
+        f"/change-requests/{created['id']}/submit",
+        {"expected_version": change["version"]},
+        200,
+    )
+    post(
+        "approver",
+        f"/change-requests/{created['id']}/decision",
+        dict(digest=simulation["digest"], decision="APPROVE", justification="Reviewed simulation"),
+        200,
+    )
+    if finish:
+        post(
+            "operator",
+            f"/change-requests/{created['id']}/execute",
+            {"digest": simulation["digest"]},
+            202,
+        )
+        process_one(worker, twin["org"])
+    return current(created["id"]), simulation

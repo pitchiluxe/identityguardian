@@ -120,6 +120,41 @@ def build_operations(base: Snapshot, conn, operations):
                     dst=node_json(dst),
                 )
             )
+        elif op["op"] == "rotate_credential":
+            credential = base.by_external(op["credential"])
+            if not credential or credential.kind != "credential":
+                raise ValueError("Unknown credential")
+            holder = next(
+                (base.nodes[e.src] for e in base.inc[credential.id] if e.type == "HAS_CREDENTIAL"),
+                None,
+            )
+            dependents = (
+                [base.nodes[e.src] for e in base.inc[holder.id] if e.type == "RESOURCE_DEPENDS_ON"]
+                if holder
+                else []
+            )
+            uses = (
+                [base.nodes[e.dst] for e in base.out[holder.id] if e.classification == "grant"]
+                if holder
+                else []
+            )
+            described.append(
+                dict(
+                    op="rotate_credential",
+                    relationship=None,
+                    credential=node_json(credential),
+                    holder=node_json(holder) if holder else None,
+                    impact=dict(
+                        access_change="none — rotation replaces credential material only",
+                        must_update=[n.name for n in dependents + uses],
+                        guidance="Use bounded overlap: issue the new credential, update dependents, "
+                        "then retire the old one. The platform never sees secret values.",
+                    ),
+                )
+            )
+            source_versions["credential:" + credential.id] = str(
+                credential.attributes.get("rotated_at")
+            )
         else:
             raise ValueError("Unsupported operation")
     return removals, additions, described, source_versions
@@ -130,6 +165,8 @@ def simulate(conn, base: Snapshot, environment_id, operations):
     after = overlay(base, removals, additions)
     affected = set()
     for op in described:
+        if not op["relationship"]:
+            continue
         start = op["relationship"]["src"]
         affected |= holders(base, start) | holders(after, start)
     identities, lockouts, dependencies, unknowns = [], [], [], []

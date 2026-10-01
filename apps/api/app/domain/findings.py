@@ -314,6 +314,133 @@ def unused_findings(snap, conn):
     return out
 
 
+CREDENTIAL_MAX_AGE_DAYS = 365
+CREDENTIAL_EXPIRY_WARNING_DAYS = 30
+
+
+def machine_context(snap: Snapshot, node_id: str):
+    """Owner, credentials and dependents of a machine or agent identity (metadata only)."""
+    node = snap.nodes[node_id]
+    owners = [snap.nodes[e.src] for e in snap.inc[node_id] if e.type == "USER_OWNS_SERVICE_ACCOUNT"]
+    credentials = [(snap.nodes[e.dst], e) for e in snap.out[node_id] if e.type == "HAS_CREDENTIAL"]
+    dependents = [snap.nodes[e.src] for e in snap.inc[node_id] if e.type == "RESOURCE_DEPENDS_ON"]
+    direct = [
+        snap.nodes[e.dst]
+        for e in snap.out[node_id]
+        if e.type in {"SERVICE_ACCOUNT_ACCESS_APPLICATION", "AI_AGENT_ACCESS_DATA"}
+    ]
+    return node, owners, credentials, dependents, direct
+
+
+def machine_findings(snap: Snapshot, conn):
+    out = []
+    now = snap.effective_at
+    for node in snap.nodes.values():
+        if node.kind != "identity" or node.subtype not in {"machine", "agent"}:
+            continue
+        _, owners, credentials, dependents, direct = machine_context(snap, node.id)
+        active_owners = [o for o in owners if o.status != "terminated"]
+        dependent_names = [d.name for d in dependents]
+        if not active_owners:
+            access = effective_access(snap, node.id, conn)
+            privileged = [e for e in access["entries"] if is_privileged(e)]
+            out.append(
+                dict(
+                    key=key("OWNERLESS_MACHINE", node.id),
+                    rule="OWNERLESS_MACHINE",
+                    severity="high" if privileged else "medium",
+                    identity=node_json(node),
+                    title=f"Non-human identity without an accountable owner: {node.name}",
+                    summary=(
+                        f"{node.subtype.title()} identity '{node.name}' ({node.attributes.get('purpose', 'no purpose recorded')}) "
+                        f"has no active owner{' (owner terminated)' if owners else ''}. "
+                        f"{len(privileged)} privileged entitlement(s); dependents: {', '.join(dependent_names) or 'none modelled'}."
+                    ),
+                    reaches=[
+                        dict(
+                            target=(e["resource"] or e["permission"])["name"],
+                            target_id=(e["resource"] or e["permission"])["external_id"],
+                            decision=e["decision"],
+                            privileged=is_privileged(e),
+                            paths=e["paths"],
+                        )
+                        for e in access["entries"]
+                    ],
+                    usage=[],
+                    dependents=dependent_names,
+                    recommendation="Propose an accountable owner (ownership never grants access)",
+                    evidence_ids=[
+                        e
+                        for entry in access["entries"]
+                        for p in entry["paths"]
+                        for e in p["evidence_ids"]
+                    ],
+                )
+            )
+        for credential, edge in credentials:
+            attrs = credential.attributes
+            rotated = attrs.get("rotated_at") or attrs.get("created_at")
+            expires = attrs.get("expires_at")
+            facts = dict(
+                credential=credential.external_id,
+                type=credential.subtype,
+                rotated_at=rotated,
+                expires_at=expires,
+            )
+            if expires:
+                left = (datetime.fromisoformat(expires) - now).days
+                if left <= CREDENTIAL_EXPIRY_WARNING_DAYS:
+                    out.append(
+                        dict(
+                            key=key("CREDENTIAL_EXPIRING", credential.id, expires),
+                            rule="CREDENTIAL_EXPIRING",
+                            severity="high" if left < 0 or dependents else "medium",
+                            identity=node_json(node),
+                            title=f"{credential.subtype.replace('_', ' ').title()} for {node.name} "
+                            f"{'expired' if left < 0 else f'expires in {left} days'}",
+                            summary=(
+                                f"{credential.external_id} expires {expires[:10]}. Dependents that may fail "
+                                f"on expiry: {', '.join(dependent_names) or 'none modelled'}. "
+                                "Only metadata is stored; no secret material is available to the platform."
+                            ),
+                            credential=facts,
+                            reaches=[],
+                            usage=[],
+                            dependents=dependent_names,
+                            recommendation="Propose rotation before expiry and coordinate dependents",
+                            evidence_ids=[edge.observation_id],
+                        )
+                    )
+            # Federated credentials issue short-lived tokens and hold no long-lived secret.
+            secretless = credential.subtype == "federated_credential"
+            if (
+                not secretless
+                and rotated
+                and (now - datetime.fromisoformat(rotated)).days > CREDENTIAL_MAX_AGE_DAYS
+            ):
+                age = (now - datetime.fromisoformat(rotated)).days
+                out.append(
+                    dict(
+                        key=key("CREDENTIAL_AGED", credential.id, rotated),
+                        rule="CREDENTIAL_AGED",
+                        severity="medium",
+                        identity=node_json(node),
+                        title=f"{credential.external_id} not rotated for {age} days",
+                        summary=(
+                            f"Last rotation {rotated[:10]} exceeds the {CREDENTIAL_MAX_AGE_DAYS}-day "
+                            f"policy. Dependents: {', '.join(dependent_names) or 'none modelled'}."
+                        ),
+                        credential=facts,
+                        reaches=[],
+                        usage=[],
+                        dependents=dependent_names,
+                        recommendation="Propose rotation with bounded overlap for dependents",
+                        evidence_ids=[edge.observation_id],
+                    )
+                )
+    return out
+
+
 def all_findings(snap: Snapshot, conn, environment_id):
     events = conn.execute(
         "SELECT * FROM employment_events WHERE environment_id=%s AND effective_at<=%s "
@@ -325,6 +452,7 @@ def all_findings(snap: Snapshot, conn, environment_id):
         + leaver_findings(snap, conn)
         + dormant_findings(snap, conn)
         + unused_findings(snap, conn)
+        + machine_findings(snap, conn)
     )
     for item in results:
         item["rules_version"] = RULES_VERSION

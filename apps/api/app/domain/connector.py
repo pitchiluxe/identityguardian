@@ -2,7 +2,7 @@
 operation, read back. Writes go to the simulated source system only, never to the twin.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from ..jsonutil import jsonb as Jsonb
 
@@ -115,4 +115,56 @@ def read_back(conn, environment_id, object_id):
             version=row["version"],
             valid_to=row["body"].get("valid_to"),
         )
+    )
+
+
+def rotate_credential(
+    conn, environment_id, credential_id, effective_at=None, fault=None, lifetime_days=365
+):
+    """Record a rotation at the sandbox source: new revision with fresh rotation/expiry metadata.
+    The sandbox models metadata only; no secret value is generated, stored or returned."""
+    effective_at = effective_at or datetime.now(timezone.utc)
+    if fault == "fail_before_write":
+        raise ConnectorError("Sandbox source rejected the rotation (injected fault)")
+    row = conn.execute(
+        "SELECT body FROM sandbox_objects WHERE environment_id=%s AND object_id=%s "
+        "AND object_type='node' AND NOT deleted FOR UPDATE",
+        (environment_id, credential_id),
+    ).fetchone()
+    if not row or row["body"].get("kind") != "credential":
+        raise ConnectorError("Credential does not exist at the source")
+    body = dict(row["body"])
+    current = sorted(body["revisions"], key=lambda r: r["valid_from"])[-1]
+    attributes = dict(
+        current["attributes"],
+        rotated_at=effective_at.isoformat(),
+        expires_at=(effective_at + timedelta(days=lifetime_days)).isoformat(),
+    )
+    body["revisions"] = body["revisions"] + [
+        dict(valid_from=effective_at.isoformat(), status="active", attributes=attributes)
+    ]
+    conn.execute(
+        "UPDATE sandbox_objects SET body=%s, version=%s, updated_at=now() WHERE environment_id=%s "
+        "AND object_id=%s",
+        (Jsonb(body), _version(conn), environment_id, credential_id),
+    )
+    return dict(
+        operation="rotate_credential",
+        object_id=credential_id,
+        effective_at=effective_at.isoformat(),
+        lost_response=fault == "timeout_after_write",
+    )
+
+
+def credential_rotated_since(conn, environment_id, credential_id, since):
+    row = conn.execute(
+        "SELECT body FROM sandbox_objects WHERE environment_id=%s AND object_id=%s",
+        (environment_id, credential_id),
+    ).fetchone()
+    if not row:
+        return None
+    latest = sorted(row["body"]["revisions"], key=lambda r: r["valid_from"])[-1]
+    rotated = latest["attributes"].get("rotated_at")
+    return dict(
+        present=bool(rotated and datetime.fromisoformat(rotated) >= since), rotated_at=rotated
     )
