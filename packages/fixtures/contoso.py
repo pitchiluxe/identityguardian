@@ -961,7 +961,7 @@ def build(alternate_path: bool = False) -> list[dict]:
                     created_at=ts(created),
                     rotated_at=ts(rotated),
                     expires_at=ts(expires) if expires else None,
-                    secret_material="none (metadata only)",
+                    secret_material="none (metadata only)",  # noqa: S106 - descriptor, not a secret
                 ),
                 valid_from=created,
             )

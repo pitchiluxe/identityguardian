@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     ai_enabled: bool = True
     ai_allowed_hosts: list[str] = []
     secret_master_key: str = ""
+    audit_signing_key: str = ""
     connector_allowlist: list[str] = []
 
     @model_validator(mode="after")

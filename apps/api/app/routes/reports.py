@@ -5,10 +5,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..auth import require_session
 from ..domain.reports import REPORT_TYPES, build, redact, to_csv
 from ..jsonutil import dumps
 from ..jsonutil import jsonb as Jsonb
@@ -16,7 +17,7 @@ from ..scope import envelope, scoped
 from ..security import digest
 from .twin import ENV, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 class ReportRequest(BaseModel):

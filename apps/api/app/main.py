@@ -7,7 +7,8 @@ from pathlib import Path
 from uuid import UUID, uuid4
 
 import psycopg
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
@@ -15,12 +16,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 from .ai.provider import OllamaProvider
-from .auth import authenticate, begin_login, complete_login, membership
+from .auth import authenticate, begin_login, complete_login, membership, require_session
 from .config import Settings
 from .db import Database
 from .limits import within_quota
 from .routes import ROUTERS
 from .security import ROLE_CAPABILITIES, capabilities, digest, require_recent_mfa
+
+MAX_BODY_BYTES = 1_000_000
 
 
 class RoleProposal(BaseModel):
@@ -93,9 +96,25 @@ def create_app(settings=None):
         except ValueError as exc:  # misconfiguration is reported, never silently bypassed
             app.state.llm_error = str(exc)
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc):
+        # Field locations and messages only: never echo submitted values (they may be secrets).
+        errors = [
+            dict(loc=list(e.get("loc", [])), msg=e.get("msg"), type=e.get("type"))
+            for e in exc.errors()
+        ]
+        return JSONResponse({"detail": errors}, status_code=422)
+
     @app.middleware("http")
     async def boundary(request, call_next):
         request.state.correlation = uuid4()
+        length = request.headers.get("content-length")
+        if length and length.isdigit() and int(length) > MAX_BODY_BYTES:
+            return JSONResponse(
+                {"detail": "Request body too large"},
+                status_code=413,
+                headers={"X-Correlation-ID": str(request.state.correlation)},
+            )
         try:
             if request.url.path.startswith("/api/") and request.url.path != "/api/v1/health":
                 if not await run_in_threadpool(within_quota, request):
@@ -152,7 +171,7 @@ def create_app(settings=None):
             "auth_time": user["auth_time"],
         }
 
-    @app.post("/api/v1/auth/logout")
+    @app.post("/api/v1/auth/logout", dependencies=[Depends(require_session)])
     def logout(request: Request):
         user = authenticate(request)
         with app.state.db.transaction() as conn:
@@ -209,7 +228,11 @@ def create_app(settings=None):
                 "SELECT * FROM role_requests ORDER BY created_at DESC LIMIT 100"
             ).fetchall()
 
-    @app.post("/api/v1/organizations/{org}/role-requests", status_code=201)
+    @app.post(
+        "/api/v1/organizations/{org}/role-requests",
+        status_code=201,
+        dependencies=[Depends(require_session)],
+    )
     def propose(org: UUID, body: RoleProposal, request: Request):
         user = authenticate(request)
         if set(body.roles) - ROLE_CAPABILITIES.keys():
@@ -279,7 +302,7 @@ def create_app(settings=None):
         with app.state.db.transaction(org) as conn:
             # All role transitions serialize before reading authorization or locking targets.
             conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (str(org),))
-            user = authenticate(request)
+            user = authenticate(request, fresh=True)  # re-validate after waiting for the lock
             membership(conn, user["user_id"], "members:execute" if execute else "members:approve")
             mfa(user)
             row = conn.execute(
@@ -352,11 +375,17 @@ def create_app(settings=None):
                 )
             return {"status": "EXECUTED" if execute else "APPROVED"}
 
-    @app.post("/api/v1/organizations/{org}/role-requests/{identifier}/approve")
+    @app.post(
+        "/api/v1/organizations/{org}/role-requests/{identifier}/approve",
+        dependencies=[Depends(require_session)],
+    )
     def approve(org: UUID, identifier: UUID, body: Decision, request: Request):
         return transition(org, identifier, body, request)
 
-    @app.post("/api/v1/organizations/{org}/role-requests/{identifier}/execute")
+    @app.post(
+        "/api/v1/organizations/{org}/role-requests/{identifier}/execute",
+        dependencies=[Depends(require_session)],
+    )
     def execute(org: UUID, identifier: UUID, body: Decision, request: Request):
         return transition(org, identifier, body, request, True)
 

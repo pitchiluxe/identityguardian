@@ -44,6 +44,18 @@ export function EnvironmentForm({ org, session }: { org: string; session: Sessio
     {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status"><Check size={16}/>{notice}</p>}<button className="secondary">Create sandbox</button></form>;
 }
 
+export function AuditIntegrity({ org, session }: { org: string; session: Session }) {
+  const [result, setResult] = useState<{ result: string; chain: { result: string; events: number; head_sequence?: number; first_broken_sequence?: number }; checkpoints: { sequence: number; signature: string; chain_matches: boolean }[]; limitation: string } | null>(null);
+  const [checkpoint, setCheckpoint] = useState<Record<string, unknown> | null>(null); const [error, setError] = useState('');
+  const verify = async () => { setError(''); try { setResult((await api<{ data: typeof result }>(`/organizations/${org}/audit/verify`)).data); } catch (e) { setError((e as Error).message); } };
+  const sign = async () => { setError(''); try { setCheckpoint((await api<{ data: Record<string, unknown> }>(`/organizations/${org}/audit/checkpoints`, 'POST', {}, session.csrf_token)).data); await verify(); } catch (e) { setError((e as Error).message); } };
+  return <section className="panel"><div className="section-heading"><h2>Audit integrity</h2><span>Hash chain + signed checkpoints</span></div><div className="pad">
+    <div className="button-row"><button className="secondary" onClick={verify}>Verify chain</button><button className="secondary" onClick={sign}>Create signed checkpoint</button></div>
+    {error && <p className="error" role="alert">{error}</p>}
+    {result && <p><strong>{result.result}</strong> · chain {result.chain.result} over {result.chain.events} events{result.chain.first_broken_sequence ? ` · first broken sequence ${result.chain.first_broken_sequence}` : ''} · {result.checkpoints.length} checkpoint(s) {result.checkpoints.every(c => c.signature === 'VALID' && c.chain_matches) ? 'match' : 'DO NOT match'}<small className="block">{result.limitation}</small></p>}
+    {checkpoint && <><p>Store this checkpoint outside the platform:</p><pre className="code">{JSON.stringify(checkpoint, null, 2)}</pre></>}</div></section>;
+}
+
 export function AuditLog({ org }: { org: string }) {
   const [events, setEvents] = useState<Audit[]>([]); const [error, setError] = useState('');
   useEffect(() => { api<Audit[]>(`/organizations/${org}/audit`).then(setEvents).catch(e => setError(e.message)); }, [org]);

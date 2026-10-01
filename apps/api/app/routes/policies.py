@@ -4,9 +4,10 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..auth import require_session
 from ..domain.policy import (
     PolicyError,
     definition_digest,
@@ -21,7 +22,7 @@ from ..security import digest
 from .changes import require_mfa
 from .twin import ENV, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 class PolicyRequest(BaseModel):
@@ -37,11 +38,15 @@ class PolicyDecision(BaseModel):
 
 
 def load_version(scope, version_id, lock=False):
-    row = scope.conn.execute(
+    base = (
         "SELECT v.*, p.environment_id FROM policy_versions v JOIN policies p ON p.id=v.policy_id "
-        "WHERE v.id=%s AND p.environment_id=%s" + (" FOR UPDATE OF v" if lock else ""),
-        (version_id, scope.env_id),
-    ).fetchone()
+        "WHERE v.id=%s AND p.environment_id=%s"
+    )
+    locked = (
+        "SELECT v.*, p.environment_id FROM policy_versions v JOIN policies p ON p.id=v.policy_id "
+        "WHERE v.id=%s AND p.environment_id=%s FOR UPDATE OF v"
+    )
+    row = scope.conn.execute(locked if lock else base, (version_id, scope.env_id)).fetchone()
     if not row:
         raise HTTPException(404, "Policy version not found")
     return row

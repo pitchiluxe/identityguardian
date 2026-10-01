@@ -5,9 +5,10 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..auth import require_session
 from ..domain import changes
 from ..domain.graph import node_json
 from ..domain.policy import active_policy_version
@@ -19,7 +20,7 @@ from ..scope import envelope, scoped
 from ..security import digest, require_recent_mfa
 from .twin import ENV, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 class Operation(BaseModel):
@@ -99,11 +100,12 @@ def binding(
 
 
 def load_change(scope, change_id, lock=False):
-    row = scope.conn.execute(
-        "SELECT * FROM change_requests WHERE id=%s AND environment_id=%s"
-        + (" FOR UPDATE" if lock else ""),
-        (change_id, scope.env_id),
-    ).fetchone()
+    query = (
+        "SELECT * FROM change_requests WHERE id=%s AND environment_id=%s FOR UPDATE"
+        if lock
+        else "SELECT * FROM change_requests WHERE id=%s AND environment_id=%s"
+    )
+    row = scope.conn.execute(query, (change_id, scope.env_id)).fetchone()
     if not row:
         raise HTTPException(404, "Change request not found")
     return row

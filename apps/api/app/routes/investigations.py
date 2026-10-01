@@ -3,20 +3,21 @@
 import time
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..ai import intents
 from ..ai.planner import CAPABILITY, plan
 from ..ai.provider import ProviderUnavailable
 from ..ai.validate import SCHEMA, prompt, validate
+from ..auth import require_session
 from ..jsonutil import dumps
 from ..jsonutil import jsonb as Jsonb
 from ..scope import envelope, scoped
 from ..security import digest
 from .twin import ENV, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 class Question(BaseModel):

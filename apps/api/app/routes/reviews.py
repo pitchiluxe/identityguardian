@@ -4,10 +4,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..auth import membership
+from ..auth import membership, require_session
 from ..domain import changes
 from ..domain.findings import all_findings
 from ..jsonutil import jsonb as Jsonb
@@ -15,7 +15,7 @@ from ..scope import envelope, scoped
 from ..security import capabilities
 from .twin import ENV, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 RULES = {
     "PRIOR_ROLE_RETAINED",
     "TERMINATED_WITH_ACCESS",

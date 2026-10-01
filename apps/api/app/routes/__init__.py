@@ -1,5 +1,6 @@
 from . import (
     access,
+    audit_chain,
     changes,
     connectors,
     findings,
@@ -26,4 +27,6 @@ ROUTERS = [
     labs.router,
     connectors.router,
     reports.router,
+    connectors.webhooks,
+    audit_chain.router,
 ]

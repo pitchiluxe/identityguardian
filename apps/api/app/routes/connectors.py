@@ -6,9 +6,10 @@ import time
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..auth import require_session
 from ..connectors.base import validate_endpoint
 from ..connectors.providers import build
 from ..jsonutil import jsonb as Jsonb
@@ -16,7 +17,9 @@ from ..scope import envelope, scoped
 from ..secrets_envelope import open_envelope, seal
 from .twin import ENV
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
+# Provider webhooks carry no session; authenticity is the HMAC signature.
+webhooks = APIRouter(prefix="/api/v1/organizations/{org}")
 WEBHOOK_TOLERANCE = 300
 
 
@@ -179,7 +182,7 @@ def sync(org: UUID, env: UUID, connector_id: UUID, body: SyncRequest, request: R
         )
 
 
-@router.post(ENV + "/connectors/{connector_id}/webhook", status_code=202)
+@webhooks.post(ENV + "/connectors/{connector_id}/webhook", status_code=202)
 async def webhook(org: UUID, env: UUID, connector_id: UUID, request: Request):
     """Signed change notification from a provider. No session: authenticity is the HMAC."""
     raw = await request.body()

@@ -1,6 +1,6 @@
 # Threat model
 
-Design assessment, not discovered vulnerabilities. Assets: identity topology, credentials, approvals, sessions, evidence, history and lab isolation. Adversaries include anonymous attackers, malicious normal users, compromised administrators, malicious source content and compromised connectors/models/infrastructure.
+Design assessment, not discovered vulnerabilities. Phase 18 validation of each row against implemented mitigations and tests, with unresolved risks, is in [docs/security/phase-18-assessment.md](docs/security/phase-18-assessment.md). Assets: identity topology, credentials, approvals, sessions, evidence, history and lab isolation. Adversaries include anonymous attackers, malicious normal users, compromised administrators, malicious source content and compromised connectors/models/infrastructure.
 
 | Boundary / threat | Mitigation | Verification and residual risk |
 |---|---|---|

@@ -4,11 +4,12 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..ai.provider import ProviderUnavailable
 from ..ai.validate import SCHEMA, validate
+from ..auth import require_session
 from ..domain.graph import load
 from ..domain.ingest import run_sync, seed_sandbox
 from ..jsonutil import jsonb as Jsonb
@@ -16,7 +17,7 @@ from ..labs.actions import LabActionError, apply
 from ..labs.catalog import CATALOG_VERSION, LABS, score
 from ..scope import envelope, scoped
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 class ActionRequest(BaseModel):
@@ -31,11 +32,15 @@ def lab_or_404(lab_id):
 
 
 def attempt_for(scope, attempt_id, lock=False):
-    row = scope.conn.execute(
-        "SELECT a.*, e.name AS environment_name FROM lab_attempts a JOIN environments e ON e.id=a.environment_id "
-        "WHERE a.id=%s" + (" FOR UPDATE OF a" if lock else ""),
-        (attempt_id,),
-    ).fetchone()
+    base = (
+        "SELECT a.*, e.name AS environment_name FROM lab_attempts a "
+        "JOIN environments e ON e.id=a.environment_id WHERE a.id=%s"
+    )
+    locked = (
+        "SELECT a.*, e.name AS environment_name FROM lab_attempts a "
+        "JOIN environments e ON e.id=a.environment_id WHERE a.id=%s FOR UPDATE OF a"
+    )
+    row = scope.conn.execute(locked if lock else base, (attempt_id,)).fetchone()
     if not row or (row["learner_id"] != scope.user_id and "lab:manage" not in scope.caps):
         raise HTTPException(404, "Lab attempt not found")
     return row

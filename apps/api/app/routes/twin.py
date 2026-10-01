@@ -6,14 +6,15 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..auth import require_session
 from ..domain import graph
 from ..domain.ingest import run_sync, seed_sandbox
 from ..scope import envelope, scoped
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 ENV = "/environments/{env}"
 
 

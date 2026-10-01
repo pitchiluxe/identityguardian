@@ -3,9 +3,10 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..auth import require_session
 from ..domain import changes
 from ..domain.graph import node_json
 from ..domain.lifecycle import plan_for, workflow_status
@@ -15,7 +16,7 @@ from ..scope import envelope, scoped
 from .changes import ProposalRequest, require_mfa, simulate_and_submit
 from .twin import ENV, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 class BaselineRequest(BaseModel):

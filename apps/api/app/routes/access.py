@@ -3,13 +3,14 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from ..auth import require_session
 from ..domain.access import Bounds, effective_access, principals_for
 from ..scope import envelope, scoped
 from .twin import ENV, resolve, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 def bounds(depth, paths):

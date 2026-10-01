@@ -3,8 +3,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
+from ..auth import require_session
 from ..domain.access import effective_access
 from ..domain.agents import AGENT_RULES, activity, agent_profile
 from ..domain.exposure import attack_paths
@@ -13,7 +14,7 @@ from ..domain.graph import node_json
 from ..scope import envelope, scoped
 from .twin import ENV, resolve, snapshot_for
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 @router.get(ENV + "/findings")

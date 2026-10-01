@@ -1,6 +1,6 @@
 # Security design
 
-Requirements only; no implemented or tested controls yet.
+Status (2026-10-01): the controls below are implemented for the local synthetic build and verified by automated tests; see [docs/security/phase-18-assessment.md](docs/security/phase-18-assessment.md) for evidence, residual risks and the open production gates. No independent penetration test has been performed.
 
 Treat browsers, connector records, tickets and model outputs as untrusted. Bind APIs, exports, jobs, graph queries, caches and citations to verified organization/environment/resource scope. Server authorization is mandatory; UI hiding is insufficient. RLS and composite foreign keys add isolation. Lab environments cannot reference production connector credentials.
 

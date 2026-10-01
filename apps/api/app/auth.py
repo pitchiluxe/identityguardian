@@ -13,7 +13,11 @@ from fastapi.responses import RedirectResponse
 from .security import capabilities, digest, validate_claims
 
 
-def authenticate(request: Request):
+def authenticate(request: Request, fresh: bool = False):
+    """Validate the session (and CSRF for mutations). Cached per request unless `fresh`."""
+    cached = getattr(request.state, "session", None)
+    if cached is not None and not fresh:
+        return cached
     token = request.cookies.get("ig_session", "")
     if not token:
         raise HTTPException(401, "Sign in to continue")
@@ -34,7 +38,13 @@ def authenticate(request: Request):
             digest(csrf), session["csrf_hash"]
         ):
             raise HTTPException(403, "Invalid request origin or CSRF token")
+    request.state.session = session
     return session
+
+
+def require_session(request: Request):
+    """Router dependency: authenticate before request bodies are validated."""
+    authenticate(request)
 
 
 def membership(conn, user_id, capability=None):

@@ -3,16 +3,17 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import AwareDatetime, BaseModel, ConfigDict
 
+from ..auth import require_session
 from ..domain.graph import load
 from ..domain.history import checksum, coverage, reconstruct
 from ..jsonutil import jsonb as Jsonb
 from ..scope import envelope, scoped
 from .twin import ENV, times
 
-router = APIRouter(prefix="/api/v1/organizations/{org}")
+router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 
 
 class SnapshotRequest(BaseModel):

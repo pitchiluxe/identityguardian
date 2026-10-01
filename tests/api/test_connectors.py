@@ -15,7 +15,7 @@ from apps.api.app.db import Database
 from apps.worker.main import process_one
 from tests.api.conftest import as_user
 
-SECRET = "mock-webhook-signing-secret-0001"
+SECRET = "mock-webhook-signing-secret-0001"  # secret-scan: allow - synthetic test value
 
 
 @pytest.fixture
@@ -167,7 +167,9 @@ def test_webhooks_are_verified_and_replay_safe(client, twin):
     assert client.post(url, content=body, headers=headers).status_code == 409  # same delivery
     assert (
         client.post(
-            url, content=body, headers=signed(body, secret="wrong-secret-value-000")
+            url,
+            content=body,
+            headers=signed(body, secret="wrong-secret-value-000"),  # secret-scan: allow - synthetic
         ).status_code
         == 401
     )
