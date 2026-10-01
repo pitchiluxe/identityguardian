@@ -8,7 +8,7 @@ def within_quota(request):
     settings = request.app.state.settings
     now = int(time.time() // 60)
     kind = "write" if request.method not in {"GET", "HEAD"} else "read"
-    limit = 10 if kind == "write" else 60
+    limit = settings.write_limit_per_minute if kind == "write" else settings.read_limit_per_minute
     peer = request.client.host if request.client else "unknown"
     with request.app.state.db.transaction() as conn:
         session = None

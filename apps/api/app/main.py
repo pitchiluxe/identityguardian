@@ -16,6 +16,7 @@ from .auth import authenticate, begin_login, complete_login, membership
 from .config import Settings
 from .db import Database
 from .limits import within_quota
+from .routes import ROUTERS
 from .security import ROLE_CAPABILITIES, capabilities, digest, require_recent_mfa
 
 
@@ -334,6 +335,9 @@ def create_app(settings=None):
     @app.post("/api/v1/organizations/{org}/role-requests/{identifier}/execute")
     def execute(org: UUID, identifier: UUID, body: Decision, request: Request):
         return transition(org, identifier, body, request, True)
+
+    for router in ROUTERS:
+        app.include_router(router)
 
     web = Path(__file__).resolve().parents[2] / "web" / "dist"
     if web.exists():

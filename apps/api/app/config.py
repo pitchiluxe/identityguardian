@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     development: bool = True
     session_idle_seconds: int = 1800
     session_absolute_seconds: int = 28800
+    read_limit_per_minute: int = 60
+    write_limit_per_minute: int = 10
 
     @model_validator(mode="after")
     def secure_deployment(self):

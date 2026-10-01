@@ -4,15 +4,35 @@ import time
 
 import jwt
 
+_READ = {"overview:read", "identity:read", "graph:read"}
+_ANALYSIS = _READ | {"access:read", "findings:read", "history:read"}
+
+# Capabilities are the only authority. Observed directory roles never map into this table.
 ROLE_CAPABILITIES = {
-    "viewer": {"overview:read"},
-    "investigator": {"overview:read"},
-    "reviewer": {"overview:read"},
-    "approver": {"overview:read", "members:read", "members:approve"},
-    "operator": {"overview:read", "members:read", "members:execute"},
-    "org_admin": {"overview:read", "members:read", "members:propose", "audit:read"},
-    "auditor": {"overview:read", "audit:read"},
-    "learner": {"overview:read"},
+    "viewer": _READ,
+    "investigator": _ANALYSIS
+    | {"change:simulate", "change:propose", "investigation:run", "jit:request"},
+    "reviewer": _ANALYSIS | {"review:decide"},
+    "approver": _ANALYSIS
+    | {"members:read", "members:approve", "change:approve", "jit:approve", "policy:approve"},
+    "operator": _ANALYSIS
+    | {"members:read", "members:execute", "change:execute", "connector:sync", "jit:execute"},
+    "org_admin": _ANALYSIS
+    | {
+        "members:read",
+        "members:propose",
+        "audit:read",
+        "connector:manage",
+        "connector:sync",
+        "sandbox:seed",
+        "review:manage",
+        "policy:propose",
+        "report:create",
+        "report:read",
+        "lab:manage",
+    },
+    "auditor": _ANALYSIS | {"audit:read", "report:read"},
+    "learner": {"overview:read", "lab:attempt"},
 }
 
 
