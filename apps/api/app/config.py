@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     ollama_timeout_seconds: float = 90.0
     ai_enabled: bool = True
     ai_allowed_hosts: list[str] = []
+    secret_master_key: str = ""
+    connector_allowlist: list[str] = []
 
     @model_validator(mode="after")
     def secure_deployment(self):

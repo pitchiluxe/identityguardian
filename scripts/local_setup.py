@@ -1,5 +1,6 @@
 """Generate local-only secrets and synthetic login realm; never print secrets."""
 
+import base64
 import json
 import secrets
 from pathlib import Path
@@ -73,6 +74,7 @@ def main():
         f"DATABASE_URL=postgresql://guardian_app:{runtime_password}@127.0.0.1:55432/identityguardian\n"
         "APP_ORIGIN=http://localhost:8000\nOIDC_ISSUER_URL=http://localhost:58080/realms/identityguardian\n"
         "OIDC_CLIENT_ID=identityguardian\nDEVELOPMENT=true\nSECURE_COOKIES=false\n"
+        f"SECRET_MASTER_KEY={base64.b64encode(secrets.token_bytes(32)).decode()}\n"
     )
     print(
         "Created ignored .env and .local files. Local login credentials are in .local/bootstrap.json."

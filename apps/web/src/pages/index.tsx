@@ -5,7 +5,7 @@ import type { Ctx, Envelope, Overview } from '../api';
 import { Panel, SnapshotNote, State } from '../ui';
 import { Access } from './Access';
 import { Agents } from './Agents';
-import { Administration, AuditLog } from './Admin';
+import { Administration, AuditLog, EnvironmentForm } from './Admin';
 import { ChangeRequests, WhatIf } from './Changes';
 import { Integrations } from './Integrations';
 import { Investigate } from './Investigate';
@@ -64,6 +64,6 @@ export const PAGES: Record<string, PageDef> = {
   Labs: { subtitle: 'Hands-on IAM exercises in isolated, learner-only LAB clones.', org: true, render: ctx => <Labs {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Sandbox connector, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
-  Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <Administration org={ctx.org} session={ctx.session} can={ctx.can}/> },
+  Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <><Administration org={ctx.org} session={ctx.session} can={ctx.can}/>{ctx.can('connector:manage') && <EnvironmentForm org={ctx.org} session={ctx.session}/>}</> },
   'Audit logs': { subtitle: 'Append-only platform audit trail.', capability: 'audit:read', denied: 'An auditor or organization administrator role is required.', org: true, render: ctx => <AuditLog org={ctx.org}/> },
 };

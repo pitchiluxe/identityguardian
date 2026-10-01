@@ -139,7 +139,8 @@ def ensure_connector(conn, environment):
 
 
 class Ingestor:
-    def __init__(self, conn, environment, run_id):
+    def __init__(self, conn, environment, run_id, source=SOURCE):
+        self.source = source
         self.conn, self.env, self.run_id = conn, environment, run_id
         self.org, self.env_id = environment["organization_id"], environment["id"]
         self.counts = dict(observed=0, unchanged=0, created=0, updated=0, tombstoned=0, rejected=0)
@@ -151,7 +152,7 @@ class Ingestor:
             self.node_cache[external_id] = self.conn.execute(
                 "SELECT id, kind, subtype FROM twin_nodes WHERE environment_id=%s AND source=%s "
                 "AND external_id=%s",
-                (self.env_id, SOURCE, external_id),
+                (self.env_id, self.source, external_id),
             ).fetchone()
         return self.node_cache[external_id]
 
@@ -164,7 +165,7 @@ class Ingestor:
         latest = self.conn.execute(
             "SELECT digest FROM observations WHERE organization_id=%s AND environment_id=%s "
             "AND source=%s AND external_id=%s ORDER BY received_at DESC LIMIT 1",
-            (self.org, self.env_id, SOURCE, row["object_id"]),
+            (self.org, self.env_id, self.source, row["object_id"]),
         ).fetchone()
         self.counts["observed"] += 1
         if latest and latest["digest"] == fingerprint:
@@ -181,7 +182,7 @@ class Ingestor:
                 uuid4(),
                 self.org,
                 self.env_id,
-                SOURCE,
+                self.source,
                 self.run_id,
                 row["object_type"],
                 row["object_id"],
@@ -239,7 +240,7 @@ class Ingestor:
                     node_id,
                     self.org,
                     self.env_id,
-                    SOURCE,
+                    self.source,
                     row["object_id"],
                     payload["kind"],
                     payload.get("subtype", ""),
@@ -311,7 +312,7 @@ class Ingestor:
         rel = self.conn.execute(
             "SELECT id, type, from_node, to_node FROM relationships WHERE environment_id=%s "
             "AND source=%s AND external_id=%s",
-            (self.env_id, SOURCE, row["object_id"]),
+            (self.env_id, self.source, row["object_id"]),
         ).fetchone()
         if not rel:
             rel_id = uuid4()
@@ -322,7 +323,7 @@ class Ingestor:
                     rel_id,
                     self.org,
                     self.env_id,
-                    SOURCE,
+                    self.source,
                     row["object_id"],
                     payload["rel"],
                     classification,
@@ -457,7 +458,7 @@ class Ingestor:
             "FROM relationships r JOIN relationship_revisions rr ON rr.relationship_id=r.id "
             "WHERE r.environment_id=%s AND r.source=%s AND rr.recorded_to IS NULL "
             "AND rr.valid_to IS NULL",
-            (self.env_id, SOURCE),
+            (self.env_id, self.source),
         ).fetchall()
         now = datetime.now(timezone.utc)
         for row in rows:

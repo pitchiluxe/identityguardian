@@ -34,6 +34,16 @@ export function Administration({ org, session, can }: { org: string; session: Se
       {c.status === 'APPROVED' && can('members:execute') && <button className="primary" disabled={busy} onClick={() => decide(c, 'execute')}>Execute approved role change</button>}</article>)}</section></>;
 }
 
+export function EnvironmentForm({ org, session }: { org: string; session: Session }) {
+  const [name, setName] = useState(''); const [notice, setNotice] = useState(''); const [error, setError] = useState('');
+  const create = async (event: React.FormEvent) => { event.preventDefault(); setError(''); setNotice(''); try {
+    await api(`/organizations/${org}/environments`, 'POST', { name }, session.csrf_token); setNotice(`Sandbox environment "${name}" created. Select it in the top bar.`); setName('');
+  } catch (e) { setError((e as Error).message); } };
+  return <form className="panel proposal" onSubmit={create}><h2>Create a sandbox environment</h2><p>Sandbox environments isolate connector and simulation work. Production environments cannot be created here.</p>
+    <label>Name<input className="text-input" aria-label="Environment name" required minLength={3} value={name} onChange={e => setName(e.target.value)}/></label>
+    {error && <p className="error" role="alert">{error}</p>}{notice && <p className="notice" role="status"><Check size={16}/>{notice}</p>}<button className="secondary">Create sandbox</button></form>;
+}
+
 export function AuditLog({ org }: { org: string }) {
   const [events, setEvents] = useState<Audit[]>([]); const [error, setError] = useState('');
   useEffect(() => { api<Audit[]>(`/organizations/${org}/audit`).then(setEvents).catch(e => setError(e.message)); }, [org]);

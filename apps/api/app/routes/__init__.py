@@ -1,6 +1,7 @@
 from . import (
     access,
     changes,
+    connectors,
     findings,
     history,
     investigations,
@@ -22,4 +23,5 @@ ROUTERS = [
     investigations.router,
     policies.router,
     labs.router,
+    connectors.router,
 ]

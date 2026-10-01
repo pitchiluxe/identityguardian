@@ -12,6 +12,7 @@ from uuid import UUID
 
 from dotenv import load_dotenv
 
+from apps.api.app.connectors.runner import run_job
 from apps.api.app.db import Database
 from apps.api.app.domain.execution import execute_change, expire_jit, reconcile
 
@@ -35,6 +36,10 @@ def process_one(db: Database, organization_id: UUID) -> bool:
     if event["event_type"] == "change_execution_requested":
         # Recorded intent makes a crash here safe: re-delivery finds EXECUTING and reconciles.
         execute_change(db, organization_id, UUID(event["payload"]["change_request_id"]))
+    elif event["event_type"] == "connector_sync_requested":
+        payload = event["payload"]
+        actor = UUID(payload["actor"]) if payload.get("actor") else None
+        run_job(db, organization_id, UUID(payload["connector_id"]), payload["mode"], actor)
     # A crash after claim leaves an expiring lease. Receipt and completion commit atomically.
     with db.transaction(organization_id) as conn:
         conn.execute("SELECT id FROM outbox WHERE id=%s FOR UPDATE", (event["id"],))

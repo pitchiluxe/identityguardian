@@ -4,10 +4,10 @@ import base64
 import json
 from datetime import datetime
 from typing import Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain import graph
 from ..domain.ingest import run_sync, seed_sandbox
@@ -266,3 +266,20 @@ def environment_capabilities(org: UUID, env: UUID, request: Request):
     """Effective capabilities in this environment (learners gain analysis rights only in their lab)."""
     with scoped(request, org, env, "overview:read") as scope:
         return envelope(scope, sorted(scope.caps))
+
+
+class EnvironmentRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=3, max_length=80)
+
+
+@router.post("/environments", status_code=201)
+def create_environment(org: UUID, body: EnvironmentRequest, request: Request):
+    """SANDBOX environments isolate connector and simulation work. PRODUCTION is never created here."""
+    with scoped(request, org, None, "connector:manage") as scope:
+        row = scope.conn.execute(
+            "INSERT INTO environments(id,organization_id,name,kind) VALUES(%s,%s,%s,'SANDBOX') RETURNING *",
+            (uuid4(), org, body.name),
+        ).fetchone()
+        scope.audit("environment.created", row["id"], body.name, after=dict(kind="SANDBOX"))
+        return envelope(scope, row)
