@@ -1,4 +1,5 @@
 import json
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -89,6 +90,10 @@ def create_app(settings=None):
             else:
                 response = await call_next(request)
         except psycopg.Error:
+            # Logged server-side with the correlation ID; the client receives no SQL details.
+            logging.getLogger("identityguardian").exception(
+                "Database error (correlation %s)", request.state.correlation
+            )
             response = JSONResponse(
                 {"detail": "Database unavailable; contact the local administrator"}, 503
             )

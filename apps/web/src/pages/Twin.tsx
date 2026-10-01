@@ -3,6 +3,7 @@ import { ArrowLeft, Network, Search } from 'lucide-react';
 import { fmt, label, useResource } from '../api';
 import type { Ctx, Envelope, TwinEdge, TwinNode } from '../api';
 import { KV, Panel, SnapshotNote, State, Tag } from '../ui';
+import { TimelinePanel } from './Radar';
 
 type Related = TwinEdge & { direction: 'in' | 'out'; other: TwinNode };
 type Profile = { node: TwinNode; relationships: Related[]; history: { name: string; status: string; attributes: Record<string, unknown>; valid_from: string; valid_to: string | null; recorded_from: string; recorded_to: string | null }[] };
@@ -35,6 +36,7 @@ export function IdentityProfile(ctx: Ctx) {
         <SnapshotNote snapshot={d.snapshot}/>
         <div className="two-col"><Panel title="Attributes" meta="Current revision"><KV rows={Object.entries(p.node.attributes)}/></Panel>
           <Panel title="Attribute history" meta="Effective and knowledge time">{p.history.map((h, i) => <div className="history-row" key={i}><strong>{fmt(h.attributes.department)} · {fmt(h.attributes.title)}</strong><small>Effective {fmt(h.valid_from)} → {h.valid_to ? fmt(h.valid_to) : 'open'} · known {fmt(h.recorded_from)}{h.recorded_to ? ` → superseded ${fmt(h.recorded_to)}` : ''}</small></div>)}</Panel></div>
+        {ctx.can('history:read') && p.node.kind === 'identity' && <TimelinePanel ctx={ctx} node={p.node.external_id}/>}
         {Object.entries(groups).map(([cls, rows]) => <Panel key={cls} title={`${label(cls)} relationships`} meta={`${rows.length} current`}><div className="table-scroll"><table><thead><tr><th>Relationship</th><th>Related</th><th>Origin / ticket</th><th>Since</th><th>Evidence</th></tr></thead><tbody>
           {rows.map(r => <tr key={r.id}><td>{r.direction === 'out' ? label(r.type) : `${label(r.type)} (incoming)`}</td><td><button className="link" onClick={() => r.other.kind === 'identity' ? ctx.navigate('Identities', { node: r.other.external_id }) : ctx.navigate('Identity graph', { node: r.other.external_id })}>{r.other.name}</button><small className="block">{label(r.other.kind)}</small></td><td>{fmt(r.attributes.origin)}{r.attributes.ticket ? ` · ${r.attributes.ticket}` : ''}{Array.isArray(r.attributes.conditions) && <small className="block">Conditions: {(r.attributes.conditions as { type: string }[]).map(c => c.type).join(', ')}</small>}</td><td>{fmt(r.valid_from)}</td><td className="mono small">{r.evidence_id.slice(0, 8)}</td></tr>)}
         </tbody></table></div></Panel>)}</>; }}</State></>;
