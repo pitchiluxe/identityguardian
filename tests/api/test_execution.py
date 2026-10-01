@@ -17,7 +17,9 @@ MIGRATION = os.environ.get("MIGRATION_DATABASE_URL")
 
 @pytest.fixture
 def worker():
-    return Database(os.environ["WORKER_DATABASE_URL"])
+    db = Database(os.environ["WORKER_DATABASE_URL"])
+    yield db
+    db.close()
 
 
 def db(sql, *params):

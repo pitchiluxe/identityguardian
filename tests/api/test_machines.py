@@ -12,7 +12,9 @@ from tests.api.support import run_change, source_add, source_update, sync
 
 @pytest.fixture
 def worker():
-    return Database(os.environ["WORKER_DATABASE_URL"])
+    db = Database(os.environ["WORKER_DATABASE_URL"])
+    yield db
+    db.close()
 
 
 def rules(client, twin, who="reviewer"):

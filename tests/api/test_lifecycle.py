@@ -12,7 +12,9 @@ from tests.api.support import source_add, sync
 
 @pytest.fixture
 def worker():
-    return Database(os.environ["WORKER_DATABASE_URL"])
+    db = Database(os.environ["WORKER_DATABASE_URL"])
+    yield db
+    db.close()
 
 
 def post(client, twin, who, path, body, status=None):

@@ -29,6 +29,7 @@ def test_worker_consumes_once_and_cannot_read_sessions():
     with pytest.raises(psycopg.errors.InsufficientPrivilege):
         with db.transaction(org) as conn:
             conn.execute("SELECT * FROM sessions")
+    db.close()
 
 
 def test_expired_lease_recovered_and_concurrent_delivery_is_idempotent():
@@ -52,3 +53,4 @@ def test_expired_lease_recovered_and_concurrent_delivery_is_idempotent():
             "SELECT attempts,processed_at FROM outbox WHERE id=%s", (event,)
         ).fetchone()
         assert row["attempts"] == 2 and row["processed_at"] is not None
+    db.close()

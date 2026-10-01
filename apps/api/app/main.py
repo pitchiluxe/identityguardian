@@ -1,6 +1,7 @@
 import json
 import logging
 import secrets
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -65,7 +66,13 @@ def mfa(session):
 
 
 def create_app(settings=None):
+    @asynccontextmanager
+    async def lifespan(app):
+        yield
+        app.state.db.close()
+
     app = FastAPI(
+        lifespan=lifespan,
         title="IdentityGuardian AI",
         version="0.1.0",
         docs_url=None,

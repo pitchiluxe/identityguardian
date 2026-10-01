@@ -14,3 +14,7 @@ Approved by the user on 2026-09-30. Depends on Phases 7–8 and 13.
 
 - `tests/api/test_policies.py` (6): unknown operator/field/key, single test, naive date and unsupported action rejected; viewer 403; full lifecycle flags Grace's permanent Global Administrator without revoking it, wrong digest 409, proposer cannot approve; failing tests block simulation; active and expired exceptions; REJECT_PROPOSED blocks a permanent Directory-Admins proposal and activation marks an in-review change STALE at approval; reversion is a new reviewed version superseding the old one.
 - Playwright `policies.spec.ts`: admin drafts/tests/simulates, approver (MFA) approves the digest, admin activates.
+
+## Correction after the Phase 14 commit
+
+The Phase 14 commit was made while the parallel suite was intermittently failing (the gate in the commit command did not check pytest's exit status). Investigation showed `ConnectionTimeout` under concurrent load: every request opened a new PostgreSQL connection. Fix (separate commit): `psycopg_pool` with tenant scope still transaction-local, `RESET ALL` on return (committed so the pool keeps the connection), pools closed on application shutdown, a single-connection pool test proving scope never carries over (including after an error), the AI rate-limit test made window-boundary safe, and browser locators scoped. Suite: 131 passed with no warnings; Playwright 23 passed.
