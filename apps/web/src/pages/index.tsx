@@ -9,6 +9,7 @@ import { Administration, AuditLog } from './Admin';
 import { ChangeRequests, WhatIf } from './Changes';
 import { Integrations } from './Integrations';
 import { JitAccess } from './Jit';
+import { Lifecycle } from './Lifecycle';
 import { Machines } from './Machines';
 import { AttackPaths } from './Paths';
 import { Radar } from './Radar';
@@ -51,6 +52,7 @@ export const PAGES: Record<string, PageDef> = {
   'JIT access': { subtitle: 'Bounded temporary access with independent approval, native expiry and revocation tracking.', capability: 'findings:read', render: ctx => <JitAccess {...ctx}/> },
   'Machine identities': { subtitle: 'Owners, credential lifecycle metadata, dependencies and privileged access.', capability: 'identity:read', render: ctx => <Machines {...ctx}/> },
   'AI agents': { subtitle: 'Registered agents: declared scope versus effective access, expiry and observed activity.', capability: 'identity:read', render: ctx => <Agents {...ctx}/> },
+  Lifecycle: { subtitle: 'Joiner baselines, mover retain/review/remove and leaver dependency plans.', capability: 'findings:read', render: ctx => <Lifecycle {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Sandbox connector, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
   Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <Administration org={ctx.org} session={ctx.session} can={ctx.can}/> },

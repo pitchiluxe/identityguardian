@@ -137,6 +137,16 @@ def versions_current(conn, source_versions) -> bool:
     (bound to the credential's current ``rotated_at``).
     """
     for key, bound in (source_versions or {}).items():
+        if key.startswith("node:"):
+            _, node_id, attribute = key.split(":", 2)
+            row = conn.execute(
+                "SELECT attributes->>%s AS value FROM node_revisions WHERE node_id=%s "
+                "AND recorded_to IS NULL ORDER BY valid_from DESC LIMIT 1",
+                (attribute, node_id),
+            ).fetchone()
+            if not row or str(row["value"]) != bound:
+                return False
+            continue
         if key.startswith("credential:"):
             row = conn.execute(
                 "SELECT attributes->>'rotated_at' AS rotated FROM node_revisions WHERE node_id=%s "

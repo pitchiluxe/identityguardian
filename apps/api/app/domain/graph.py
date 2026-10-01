@@ -49,6 +49,8 @@ class Snapshot:
     out: dict = field(default_factory=lambda: defaultdict(list))
     inc: dict = field(default_factory=lambda: defaultdict(list))
     version: str = ""
+    # Memoized derived results for this immutable snapshot (never shared with overlays).
+    cache: dict = field(default_factory=dict)
 
     def index(self):
         self.out, self.inc = defaultdict(list), defaultdict(list)

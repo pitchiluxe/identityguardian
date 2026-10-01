@@ -6,6 +6,7 @@ and lockout risks, finding deltas and explicit unknowns. "Security improvement" 
 explained finding changes, never as an invented probability.
 """
 
+import json
 from copy import copy
 from datetime import timedelta
 
@@ -30,6 +31,7 @@ def overlay(base: Snapshot, removals: set, additions: list) -> Snapshot:
     snap = copy(base)
     snap.edges = [e for e in base.edges if e.relationship_id not in removals] + additions
     snap.version = base.version + "+sim"
+    snap.cache = {}
     return snap.index()
 
 
@@ -154,6 +156,30 @@ def build_operations(base: Snapshot, conn, operations):
             )
             source_versions["credential:" + credential.id] = str(
                 credential.attributes.get("rotated_at")
+            )
+        elif op["op"] == "disable_account":
+            account = base.by_external(op["account"])
+            if not account or account.kind != "account":
+                raise ValueError("Unknown account")
+            holder = next(
+                (base.nodes[e.src] for e in base.inc[account.id] if e.type == "HAS_ACCOUNT"), None
+            )
+            described.append(
+                dict(
+                    op="disable_account",
+                    relationship=None,
+                    account=node_json(account),
+                    holder=node_json(holder) if holder else None,
+                    impact=dict(
+                        access_change="sign-in through this account is blocked; grants stay at the "
+                        "source until separately removed",
+                        must_update=[],
+                        guidance="Pair with removal of remaining grants and ownership transfer.",
+                    ),
+                )
+            )
+            source_versions[f"node:{account.id}:enabled"] = json.dumps(
+                account.attributes.get("enabled")
             )
         else:
             raise ValueError("Unsupported operation")

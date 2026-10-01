@@ -23,7 +23,8 @@ router = APIRouter(prefix="/api/v1/organizations/{org}")
 
 class Operation(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    op: Literal["remove_relationship", "add_relationship", "rotate_credential"]
+    op: Literal["remove_relationship", "add_relationship", "rotate_credential", "disable_account"]
+    account: str | None = Field(None, max_length=120)
     relationship: str | None = Field(None, max_length=120)
     credential: str | None = Field(None, max_length=120)
     type: str | None = Field(None, max_length=60)
@@ -41,7 +42,8 @@ class SimulationRequest(BaseModel):
 
 class ProposalRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    kind: Literal["remove_relationship", "add_relationship", "rotate_credential"]
+    kind: Literal["remove_relationship", "add_relationship", "rotate_credential", "disable_account"]
+    account: str | None = Field(None, max_length=120)
     relationship: str | None = Field(None, max_length=120)
     credential: str | None = Field(None, max_length=120)
     type: Literal["USER_MEMBER_OF_GROUP", "USER_HAS_ROLE", "USER_OWNS_SERVICE_ACCOUNT"] | None = (
@@ -59,6 +61,8 @@ def operations_for(change):
         return [dict(op="remove_relationship", relationship=target["relationship_id"])]
     if change["kind"] == "rotate_credential":
         return [dict(op="rotate_credential", credential=target["credential"]["external_id"])]
+    if change["kind"] == "disable_account":
+        return [dict(op="disable_account", account=target["account"]["external_id"])]
     params = change["parameters"]
     return [
         dict(
@@ -185,6 +189,19 @@ def propose(org: UUID, env: UUID, body: ProposalRequest, request: Request):
             if not row:
                 raise HTTPException(404, "Relationship not found")
             target = changes.relationship_target(snap, scope.conn, row["id"])
+        elif body.kind == "disable_account":
+            account = snap.by_external(body.account or "")
+            if not account or account.kind != "account":
+                raise HTTPException(422, "Choose an account")
+            holder = next(
+                (snap.nodes[e.src] for e in snap.inc[account.id] if e.type == "HAS_ACCOUNT"), None
+            )
+            target = dict(
+                type="ACCOUNT_DISABLE",
+                account=node_json(account),
+                src=node_json(holder) if holder else node_json(account),
+                dst=node_json(account),
+            )
         elif body.kind == "rotate_credential":
             credential = snap.by_external(body.credential or "")
             if not credential or credential.kind != "credential":
@@ -265,7 +282,9 @@ class JitRequest(BaseModel):
 
 class FaultRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["remove_relationship", "add_relationship"]
+    operation: Literal[
+        "remove_relationship", "add_relationship", "rotate_credential", "disable_account"
+    ]
     mode: Literal["fail_before_write", "timeout_after_write"]
     remaining: int = Field(1, ge=0, le=5)
 
@@ -446,6 +465,41 @@ def cancel(org: UUID, env: UUID, change_id: UUID, body: Transition, request: Req
         return envelope(scope, moved)
 
 
+def simulate_and_submit(scope, change, snap):
+    """Simulate a DRAFT request against `snap`, bind its digest and submit it for approval."""
+    ops = operations_for(change)
+    result, source_versions = simulate(scope.conn, snap, scope.env_id, ops)
+    expires_at = datetime.now(timezone.utc) + APPROVAL_TTL
+    bound = binding(scope.org, scope.env_id, change, ops, source_versions, snap.version, expires_at)
+    sim = scope.conn.execute(
+        "INSERT INTO simulations(id,organization_id,environment_id,change_request_id,operations,"
+        "base_graph_version,source_versions,policy_version,parameters,result,digest,created_by,"
+        "expires_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
+        (
+            uuid4(),
+            scope.org,
+            scope.env_id,
+            change["id"],
+            Jsonb(ops),
+            snap.version,
+            Jsonb(source_versions),
+            POLICY_VERSION,
+            Jsonb(change["parameters"]),
+            Jsonb(result),
+            bound,
+            scope.user_id,
+            expires_at,
+        ),
+    ).fetchone()
+    change = changes.transition(scope.conn, change, "SIMULATED")
+    scope.conn.execute(
+        "UPDATE change_requests SET simulation_id=%s, digest=%s WHERE id=%s",
+        (sim["id"], bound, change["id"]),
+    )
+    change = changes.transition(scope.conn, change, "IN_REVIEW")
+    return change, bound, sim
+
+
 @router.post(ENV + "/jit-requests", status_code=201)
 def request_jit(org: UUID, env: UUID, body: JitRequest, request: Request):
     with scoped(request, org, env, "jit:request") as scope:
@@ -468,36 +522,7 @@ def request_jit(org: UUID, env: UUID, body: JitRequest, request: Request):
         )
         if change["status"] != "DRAFT":
             return envelope(scope, change)
-        ops = operations_for(change)
-        result, source_versions = simulate(scope.conn, snap, scope.env_id, ops)
-        expires_at = datetime.now(timezone.utc) + APPROVAL_TTL
-        bound = binding(org, env, change, ops, source_versions, snap.version, expires_at)
-        sim = scope.conn.execute(
-            "INSERT INTO simulations(id,organization_id,environment_id,change_request_id,operations,"
-            "base_graph_version,source_versions,policy_version,parameters,result,digest,created_by,"
-            "expires_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id",
-            (
-                uuid4(),
-                org,
-                env,
-                change["id"],
-                Jsonb(ops),
-                snap.version,
-                Jsonb(source_versions),
-                POLICY_VERSION,
-                Jsonb(change["parameters"]),
-                Jsonb(result),
-                bound,
-                scope.user_id,
-                expires_at,
-            ),
-        ).fetchone()
-        change = changes.transition(scope.conn, change, "SIMULATED")
-        scope.conn.execute(
-            "UPDATE change_requests SET simulation_id=%s, digest=%s WHERE id=%s",
-            (sim["id"], bound, change["id"]),
-        )
-        change = changes.transition(scope.conn, change, "IN_REVIEW")
+        change, bound, sim = simulate_and_submit(scope, change, snap)
         scope.audit(
             "jit.requested",
             change["id"],

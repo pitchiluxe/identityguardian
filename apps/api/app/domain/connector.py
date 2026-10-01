@@ -168,3 +168,51 @@ def credential_rotated_since(conn, environment_id, credential_id, since):
     return dict(
         present=bool(rotated and datetime.fromisoformat(rotated) >= since), rotated_at=rotated
     )
+
+
+def disable_account(conn, environment_id, account_id, effective_at=None, fault=None):
+    """Disable a directory account at the sandbox source (new revision, enabled=false)."""
+    effective_at = effective_at or datetime.now(timezone.utc)
+    if fault == "fail_before_write":
+        raise ConnectorError("Sandbox source rejected the account disable (injected fault)")
+    row = conn.execute(
+        "SELECT body FROM sandbox_objects WHERE environment_id=%s AND object_id=%s "
+        "AND object_type='node' AND NOT deleted FOR UPDATE",
+        (environment_id, account_id),
+    ).fetchone()
+    if not row or row["body"].get("kind") != "account":
+        raise ConnectorError("Account does not exist at the source")
+    body = dict(row["body"])
+    current = sorted(body["revisions"], key=lambda r: r["valid_from"])[-1]
+    if current["attributes"].get("enabled") is not False:
+        body["revisions"] = body["revisions"] + [
+            dict(
+                valid_from=effective_at.isoformat(),
+                status="disabled",
+                attributes=dict(
+                    current["attributes"], enabled=False, disabled_at=effective_at.isoformat()
+                ),
+            )
+        ]
+        conn.execute(
+            "UPDATE sandbox_objects SET body=%s, version=%s, updated_at=now() WHERE environment_id=%s "
+            "AND object_id=%s",
+            (Jsonb(body), _version(conn), environment_id, account_id),
+        )
+    return dict(
+        operation="disable_account",
+        object_id=account_id,
+        effective_at=effective_at.isoformat(),
+        lost_response=fault == "timeout_after_write",
+    )
+
+
+def account_disabled(conn, environment_id, account_id):
+    row = conn.execute(
+        "SELECT body FROM sandbox_objects WHERE environment_id=%s AND object_id=%s",
+        (environment_id, account_id),
+    ).fetchone()
+    if not row:
+        return None
+    latest = sorted(row["body"]["revisions"], key=lambda r: r["valid_from"])[-1]
+    return dict(present=latest["attributes"].get("enabled") is False)

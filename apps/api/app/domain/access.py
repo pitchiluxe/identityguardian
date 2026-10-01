@@ -211,6 +211,18 @@ def usage_for(conn, identity_id, target_id, at):
 def effective_access(snap: Snapshot, identity: str, conn=None, bounds: Bounds | None = None):
     if identity not in snap.nodes or snap.nodes[identity].kind != "identity":
         raise KeyError(identity)
+    memo = (
+        "access",
+        identity,
+        conn is not None,
+        (bounds.depth, bounds.paths, bounds.nodes, bounds.seconds) if bounds else None,
+    )
+    if memo not in snap.cache:
+        snap.cache[memo] = _effective_access(snap, identity, conn, bounds)
+    return snap.cache[memo]
+
+
+def _effective_access(snap: Snapshot, identity: str, conn, bounds: Bounds | None):
     bounds = (bounds or Bounds()).start()
     denies = denies_for(snap, identity)
     grouped: dict = {}

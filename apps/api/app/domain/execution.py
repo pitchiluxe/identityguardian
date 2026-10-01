@@ -56,6 +56,8 @@ def source_object(change):
         return change["target"]["external_id"]
     if change["kind"] == "rotate_credential":
         return change["target"]["credential"]["external_id"]
+    if change["kind"] == "disable_account":
+        return change["target"]["account"]["external_id"]
     return f"jit-{change['id']}" if change["kind"] == "jit_grant" else f"add-{change['id']}"
 
 
@@ -161,11 +163,7 @@ def execute_change(db, org, change_id):
             "SELECT * FROM environments WHERE id=%s", (change["environment_id"],)
         ).fetchone()
     with db.transaction(org) as conn:
-        operation = (
-            "add_relationship"
-            if change["kind"] in {"add_relationship", "jit_grant"}
-            else "remove_relationship"
-        )
+        operation = "add_relationship" if change["kind"] == "jit_grant" else change["kind"]
         fault = connector.consume_fault(conn, environment["id"], operation)
     object_id = source_object(change)
     try:
@@ -178,6 +176,8 @@ def execute_change(db, org, change_id):
                 result = connector.rotate_credential(
                     conn, environment["id"], object_id, fault=fault
                 )
+            elif change["kind"] == "disable_account":
+                result = connector.disable_account(conn, environment["id"], object_id, fault=fault)
             else:
                 target, params = change["target"], change["parameters"]
                 expires = None
@@ -258,6 +258,8 @@ def confirm(db, org, change, execution, object_id, result=None):
             readback = connector.credential_rotated_since(
                 conn, change["environment_id"], object_id, since - timedelta(seconds=1)
             )
+        elif change["kind"] == "disable_account":
+            readback = connector.account_disabled(conn, change["environment_id"], object_id)
         else:
             readback = connector.read_back(conn, change["environment_id"], object_id)
         expected_present = change["kind"] != "remove_relationship"
