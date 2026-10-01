@@ -16,6 +16,12 @@ class Settings(BaseSettings):
     session_absolute_seconds: int = 28800
     read_limit_per_minute: int = 60
     write_limit_per_minute: int = 10
+    ai_limit_per_minute: int = 5
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "qwen2.5:7b"
+    ollama_timeout_seconds: float = 90.0
+    ai_enabled: bool = True
+    ai_allowed_hosts: list[str] = []
 
     @model_validator(mode="after")
     def secure_deployment(self):

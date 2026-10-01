@@ -1,4 +1,4 @@
-from . import access, changes, findings, history, lifecycle, reviews, twin
+from . import access, changes, findings, history, investigations, lifecycle, reviews, twin
 
 ROUTERS = [
     twin.router,
@@ -8,4 +8,5 @@ ROUTERS = [
     changes.router,
     lifecycle.router,
     history.router,
+    investigations.router,
 ]

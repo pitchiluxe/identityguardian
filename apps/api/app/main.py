@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from .ai.provider import OllamaProvider
 from .auth import authenticate, begin_login, complete_login, membership
 from .config import Settings
 from .db import Database
@@ -73,6 +74,17 @@ def create_app(settings=None):
     )
     app.state.settings = settings or Settings()
     app.state.db = Database(app.state.settings.database_url)
+    app.state.llm, app.state.llm_error = None, None
+    if app.state.settings.ai_enabled:
+        try:
+            app.state.llm = OllamaProvider(
+                app.state.settings.ollama_base_url,
+                app.state.settings.ollama_model,
+                app.state.settings.ollama_timeout_seconds,
+                app.state.settings.ai_allowed_hosts,
+            )
+        except ValueError as exc:  # misconfiguration is reported, never silently bypassed
+            app.state.llm_error = str(exc)
 
     @app.middleware("http")
     async def boundary(request, call_next):
