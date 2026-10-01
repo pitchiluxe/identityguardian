@@ -2,7 +2,7 @@
 
 **Autonomous Identity Intelligence, Governance & Security Platform**
 
-Status: Phase 0 design prepared for review. No application, integration, AI service or security control is implemented yet.
+Status: Phase 1 local foundation implemented and tested on loopback: OIDC login (Keycloak), opaque sessions/CSRF, PostgreSQL row-level tenant isolation, independent platform-role approval, append-only audit, outbox worker and an accessible shell. Identity ingestion, graph, AI, connectors and every later-phase capability remain PLANNED.
 
 Identity access is scattered across directories, groups, policies and applications. IdentityGuardian AI is designed to explain who can reach a resource, why, what evidence supports that conclusion, and what would happen if access changed.
 
@@ -20,8 +20,8 @@ Proposed stack: React/TypeScript, FastAPI, PostgreSQL, local Keycloak and Ollama
 
 ## Demo and installation
 
-There is nothing runnable in Phase 0. [INSTALLATION.md](INSTALLATION.md) records the intended setup. [DEMO.md](DEMO.md) defines the Contoso investigation; [LABS.md](LABS.md) defines exercises. Future verified captures belong in [screenshots](docs/screenshots/README.md) and [videos](docs/videos/README.md). No fabricated screenshots are included.
+[INSTALLATION.md](INSTALLATION.md) lists the verified local setup and its limitations. [DEMO.md](DEMO.md) defines the Contoso investigation; [LABS.md](LABS.md) defines exercises. Future verified captures belong in [screenshots](docs/screenshots/README.md) and [videos](docs/videos/README.md). No fabricated screenshots are included.
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [TESTING.md](TESTING.md) and [CHANGELOG.md](CHANGELOG.md). The original brief is [PROMPT.md](PROMPT.md). Production implementation is gated on Phase 0 review.
+Read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [TESTING.md](TESTING.md) and [CHANGELOG.md](CHANGELOG.md). The original brief is [PROMPT.md](PROMPT.md). Each later phase is gated on user approval.

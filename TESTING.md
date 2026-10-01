@@ -1,8 +1,28 @@
 # Verification strategy
 
-Phase 0 checks artifact completeness, consistency and local links. There are no application tests yet.
+Tools: pytest (unit, API and integration against a real local PostgreSQL with the runtime role), Playwright (browser flows against real Keycloak), ruff, pip-audit and npm audit. Vitest is planned once UI logic warrants it. Synthetic fixtures only.
 
-Proposed tools: pytest for API/domain/security against real PostgreSQL containers, Playwright for browser flows, Vitest for UI logic. Pin tools during implementation. Synthetic fixtures and controlled clocks only.
+```
+.venv/Scripts/python -m pytest                      # API/integration tests need migrated DB from .env
+.venv/Scripts/python -m pytest -m "not integration"
+npx playwright test                                 # needs built web, API on :8000, Keycloak, bootstrap
+.venv/Scripts/python -m ruff check . && .venv/Scripts/python -m ruff format --check .
+.venv/Scripts/python -m pip_audit -r requirements.lock && npm audit --omit=dev
+```
+
+## Phase 1 results (2026-09-30, Windows 11, local PostgreSQL 17, Keycloak 26.7.3)
+
+| Check | Result |
+|---|---|
+| pytest (unit, OIDC, API authorization, regressions, database RLS, worker) | 35 passed |
+| Playwright (signed-out shell, mobile layout, real OIDC login/logout, viewer denial via UI and API) | 4 passed |
+| `npm run build` (tsc + Vite) | succeeded |
+| ruff check / format | clean |
+| pip-audit / npm audit (production deps) | no known vulnerabilities |
+
+Phase 1 review-focus cases exercised: pooled tenant context, cross-tenant forged IDs, revoked membership, self-promotion and non-independent approval, stale digest/version, attacker-supplied role fields, audit rollback on failed transaction, interrupted/replayed login state, forged-cookie rate-limit reset and approval revocation while waiting for the execution lock. Two regressions were reproduced red before their fixes, then green.
+
+Not yet covered: approve/execute through the browser with real MFA (realm issues password-only sessions), DST/clock and performance tests, independent penetration testing. Planned layers below apply to later phases.
 
 | Layer | Required cases |
 |---|---|

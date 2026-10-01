@@ -1,11 +1,41 @@
-# Installation status
+# Installation
 
-Phase 0 is documentation only. No install/start/login/demo command exists yet.
+Status: Phase 1 local foundation. Loopback development only; no production packaging, TLS or backups. All data is synthetic (Contoso, LAB environment).
 
-After approval, pin compatible Node.js, Python, PostgreSQL and Keycloak versions with lockfiles. Proposed Windows setup uses Docker Desktop/WSL2 or equivalent containers. Ollama is optional until Phase 13; model choice depends on evaluated quality and available RAM/VRAM.
+Verified on Windows 11 with Node.js/npm, a project `.venv` (Python 3.12, deps from `requirements.lock`), PostgreSQL 17 binaries and portable Keycloak 26.7.3 / Java 21. Docker is optional: `infra/compose.yaml` provides PostgreSQL and Keycloak on the same loopback ports.
 
-Planned sequence: copy empty environment template to ignored local file; generate unique local secrets; start services; migrate with migration-only role; bootstrap first administrator through audited one-time local operation; explicitly load synthetic environment; run health and authorization tests. No default password ships. Actual commands will be documented only after verification.
+## First-time setup
 
-Production packaging requires TLS, backups, monitoring, restore procedures and key management. Do not enter production credentials during development.
+```
+python -m venv .venv
+.venv/Scripts/python -m pip install -r requirements.lock
+npm ci
+.venv/Scripts/python scripts/local_setup.py        # unique secrets -> ignored .env, realm + synthetic users -> .local/
+.venv/Scripts/python scripts/native_postgres.py    # project-local cluster on 127.0.0.1:55432 (set POSTGRES_BIN if not PostgreSQL 17 default path)
+.venv/Scripts/python scripts/install_local_idp.py  # checksum-verified Java + Keycloak into .local/runtime
+powershell -File scripts/start_idp.ps1             # Keycloak on localhost:58080 (leave running)
+.venv/Scripts/python scripts/manage.py migrate     # creates runtime/worker roles, applies migrations
+.venv/Scripts/python scripts/manage.py bootstrap   # one-time synthetic organization and memberships
+npm run build
+```
 
-Vercel CLI is not installed. If Vercel is later selected, strongly recommend `npm i -g vercel` for environment management, deployments and logs. It is not required by the proposed local-first design and was not installed here.
+`local_setup.py` refuses to overwrite an existing `.env`. `bootstrap` refuses to run twice. No default password ships; synthetic login credentials are generated into `.local/bootstrap.json` (ignored by Git). Synthetic users: alex (org_admin, operator), jordan (approver), sam (viewer).
+
+## Run
+
+```
+.venv/Scripts/python -m uvicorn apps.api.app.main:app --host 127.0.0.1 --port 8000
+```
+
+Open http://localhost:8000 and sign in through Keycloak. The API serves the built shell from `apps/web/dist`. Optional worker (records outbox receipts only; no external side effects):
+
+```
+.venv/Scripts/python -m apps.worker.main --organization 10000000-0000-4000-8000-000000000001
+```
+
+## Limitations
+
+- HTTP and non-Secure cookies are accepted only for loopback with `DEVELOPMENT=true`; any other origin fails configuration validation.
+- The synthetic Keycloak realm uses passwords only. The `mfa` assurance needed to approve or execute role changes is not issued by this realm, so those UI actions are refused with an MFA message in real browser sessions; API tests exercise them with seeded MFA sessions. Configuring OTP in the realm is future work.
+- The worker processes one organization per process.
+- No identity ingestion, graph, AI or connectors (Phase 2+).

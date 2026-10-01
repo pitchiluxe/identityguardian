@@ -1,0 +1,29 @@
+name: identityguardian
+services:
+  postgres:
+    image: postgres:18.3
+    environment:
+      POSTGRES_DB: identityguardian
+      POSTGRES_USER: guardian_migrator
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run local_setup.py}
+    ports: ["127.0.0.1:55432:5432"]
+    volumes: ["guardian_postgres:/var/lib/postgresql"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U guardian_migrator -d identityguardian"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.3
+    command: ["start-dev", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: local-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Run local_setup.py}
+      KC_HOSTNAME: http://localhost:58080
+    ports: ["127.0.0.1:58080:8080"]
+    volumes:
+      - ../.local/realm.json:/opt/keycloak/data/import/realm.json:ro
+      - guardian_keycloak:/opt/keycloak/data
+volumes:
+  guardian_postgres:
+  guardian_keycloak:

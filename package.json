@@ -1,0 +1,26 @@
+{
+  "name": "identityguardian-ai",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --config apps/web/vite.config.ts",
+    "build": "tsc --noEmit && vite build --config apps/web/vite.config.ts",
+    "test": "playwright test",
+    "test:ui": "playwright test tests/e2e/shell.spec.ts"
+  },
+  "dependencies": {
+    "lucide-react": "1.49.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "26.6.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}
