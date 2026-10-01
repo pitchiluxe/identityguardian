@@ -13,6 +13,7 @@ from datetime import timedelta
 from .access import effective_access, principals_for
 from .findings import all_findings, is_privileged
 from .graph import Edge, Snapshot, edge_json, node_json
+from .policy import active_policy_version, proposed_violations
 from .types import RELATIONSHIPS, validate
 
 UPSTREAM = {
@@ -291,6 +292,18 @@ def simulate(conn, base: Snapshot, environment_id, operations):
                             or "Workflow depends on this identity's access",
                         )
                     )
+    policy_violations = []
+    for op in described:
+        if op["op"] == "add_relationship":
+            policy_violations += proposed_violations(
+                conn,
+                environment_id,
+                base,
+                base.nodes[op["relationship"]["src"]],
+                base.nodes[op["relationship"]["dst"]],
+                op["relationship"]["type"],
+                op["relationship"]["attributes"],
+            )
     before_findings = {f["key"]: f for f in all_findings(base, conn, environment_id)}
     after_findings = {f["key"]: f for f in all_findings(after, conn, environment_id)}
     resolved = [
@@ -323,4 +336,6 @@ def simulate(conn, base: Snapshot, environment_id, operations):
         unknowns=sorted(set(unknowns)),
         base=base.describe(),
         mutated_base=False,
+        policy_violations=policy_violations,
+        policy_version=active_policy_version(conn, environment_id),
     ), source_versions

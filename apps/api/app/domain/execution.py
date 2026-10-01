@@ -17,6 +17,7 @@ from ..security import capabilities
 from . import connector
 from .changes import transition, versions_current
 from .ingest import run_sync
+from .policy import active_policy_version
 
 OVERDUE_GRACE = timedelta(minutes=5)
 
@@ -93,8 +94,11 @@ def recheck(conn, change, execution):
     if not (change["digest"] == approval["digest"] == execution["digest"]):
         return False, "STALE", "Proposal digest changed after approval"
     sim = conn.execute(
-        "SELECT source_versions FROM simulations WHERE id=%s", (change["simulation_id"],)
+        "SELECT source_versions, policy_version FROM simulations WHERE id=%s",
+        (change["simulation_id"],),
     ).fetchone()
+    if sim["policy_version"] != active_policy_version(conn, change["environment_id"]):
+        return False, "STALE", "Active policies changed since simulation"
     if not versions_current(conn, sim["source_versions"]):
         return False, "STALE", "Target changed at the source since simulation"
     return True, None, None

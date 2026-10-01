@@ -443,6 +443,7 @@ def machine_findings(snap: Snapshot, conn):
 
 def all_findings(snap: Snapshot, conn, environment_id):
     from .agents import agent_findings  # agents builds on these rules
+    from .policy import policy_findings
 
     events = conn.execute(
         "SELECT * FROM employment_events WHERE environment_id=%s AND effective_at<=%s "
@@ -456,6 +457,7 @@ def all_findings(snap: Snapshot, conn, environment_id):
         + unused_findings(snap, conn)
         + machine_findings(snap, conn)
         + agent_findings(snap, conn)
+        + policy_findings(conn, environment_id, snap)
     )
     for item in results:
         item["rules_version"] = RULES_VERSION

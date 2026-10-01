@@ -10,7 +10,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..domain import changes
 from ..domain.graph import node_json
-from ..domain.simulate import APPROVAL_TTL, POLICY_VERSION, simulate
+from ..domain.policy import active_policy_version
+from ..domain.simulate import APPROVAL_TTL, simulate
 from ..domain.types import validate
 from ..jsonutil import dumps
 from ..jsonutil import jsonb as Jsonb
@@ -75,7 +76,9 @@ def operations_for(change):
     ]
 
 
-def binding(org, env, change, operations, source_versions, graph_version, expires_at):
+def binding(
+    org, env, change, operations, source_versions, graph_version, expires_at, policy_version
+):
     return digest(
         dumps(
             dict(
@@ -88,7 +91,7 @@ def binding(org, env, change, operations, source_versions, graph_version, expire
                 operations=operations,
                 source_versions=source_versions,
                 graph_version=graph_version,
-                policy_version=POLICY_VERSION,
+                policy_version=policy_version,
                 expires_at=expires_at.isoformat(),
             )
         )
@@ -127,7 +130,16 @@ def create_simulation(org: UUID, env: UUID, body: SimulationRequest, request: Re
         except ValueError as exc:
             raise HTTPException(409, str(exc)) from None
         expires_at = datetime.now(timezone.utc) + APPROVAL_TTL
-        bound = binding(org, env, change, ops, source_versions, snap.version, expires_at)
+        bound = binding(
+            org,
+            env,
+            change,
+            ops,
+            source_versions,
+            snap.version,
+            expires_at,
+            result["policy_version"],
+        )
         sim = scope.conn.execute(
             "INSERT INTO simulations(id,organization_id,environment_id,change_request_id,operations,"
             "base_graph_version,source_versions,policy_version,parameters,result,digest,created_by,"
@@ -140,7 +152,7 @@ def create_simulation(org: UUID, env: UUID, body: SimulationRequest, request: Re
                 Jsonb(ops),
                 snap.version,
                 Jsonb(source_versions),
-                POLICY_VERSION,
+                result["policy_version"],
                 Jsonb({}),
                 Jsonb(result),
                 bound,
@@ -311,6 +323,8 @@ def simulation_current(scope, change):
     ).fetchone()
     if not sim or sim["expires_at"] <= datetime.now(timezone.utc):
         return None
+    if sim["policy_version"] != active_policy_version(scope.conn, scope.env_id):
+        return False  # policy set changed since simulation: re-simulate and re-approve
     return sim if changes.versions_current(scope.conn, sim["source_versions"]) else False
 
 
@@ -320,8 +334,14 @@ def submit(org: UUID, env: UUID, change_id: UUID, body: Transition, request: Req
         change = load_change(scope, change_id, lock=True)
         if change["status"] != "SIMULATED":
             raise HTTPException(409, "Only simulated requests can be submitted for approval")
-        if not simulation_current(scope, change):
-            raise HTTPException(409, "Simulation expired or target changed; re-simulate first")
+        sim = simulation_current(scope, change)
+        if not sim:
+            raise HTTPException(
+                409, "Simulation expired or target/policy changed; re-simulate first"
+            )
+        if sim["result"].get("policy_violations"):
+            names = ", ".join(v["policy"] for v in sim["result"]["policy_violations"])
+            raise HTTPException(409, f"Blocked by active policy: {names}")
         moved = changes.transition(scope.conn, change, "IN_REVIEW", body.expected_version)
         scope.audit(
             "change.submitted",
@@ -470,7 +490,16 @@ def simulate_and_submit(scope, change, snap):
     ops = operations_for(change)
     result, source_versions = simulate(scope.conn, snap, scope.env_id, ops)
     expires_at = datetime.now(timezone.utc) + APPROVAL_TTL
-    bound = binding(scope.org, scope.env_id, change, ops, source_versions, snap.version, expires_at)
+    bound = binding(
+        scope.org,
+        scope.env_id,
+        change,
+        ops,
+        source_versions,
+        snap.version,
+        expires_at,
+        result["policy_version"],
+    )
     sim = scope.conn.execute(
         "INSERT INTO simulations(id,organization_id,environment_id,change_request_id,operations,"
         "base_graph_version,source_versions,policy_version,parameters,result,digest,created_by,"
@@ -483,7 +512,7 @@ def simulate_and_submit(scope, change, snap):
             Jsonb(ops),
             snap.version,
             Jsonb(source_versions),
-            POLICY_VERSION,
+            result["policy_version"],
             Jsonb(change["parameters"]),
             Jsonb(result),
             bound,

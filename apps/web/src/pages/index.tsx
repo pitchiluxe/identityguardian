@@ -13,6 +13,7 @@ import { JitAccess } from './Jit';
 import { Lifecycle } from './Lifecycle';
 import { Machines } from './Machines';
 import { AttackPaths } from './Paths';
+import { Policies } from './Policies';
 import { Radar } from './Radar';
 import { Reviews } from './Reviews';
 import { TimeMachine } from './TimeMachine';
@@ -58,6 +59,7 @@ export const PAGES: Record<string, PageDef> = {
   'Time machine': { subtitle: 'What applied at a time, as known then versus as known now, with coverage.', capability: 'history:read', render: ctx => <TimeMachine {...ctx}/> },
   Investigations: { subtitle: 'Ask read-only questions; answers cite deterministic evidence.', capability: 'investigation:run', render: ctx => <Investigate {...ctx}/> },
   'AI assistant': { subtitle: 'Local model explanations of authorized evidence. Advisory only.', capability: 'investigation:run', render: ctx => <Investigate {...ctx}/> },
+  Policies: { subtitle: 'Declarative policy versions: validate, test, simulate, approve, activate.', capability: 'findings:read', render: ctx => <Policies {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Sandbox connector, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
   Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <Administration org={ctx.org} session={ctx.session} can={ctx.can}/> },
