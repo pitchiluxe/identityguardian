@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from ..domain.exposure import attack_paths
 from ..domain.findings import RULES_VERSION, all_findings, timeline
 from ..scope import envelope, scoped
 from .twin import ENV, resolve, snapshot_for
@@ -53,3 +54,29 @@ def identity_timeline(
         if node.kind != "identity":
             raise HTTPException(422, "Timelines are available for identities")
         return envelope(scope, timeline(snap, scope.conn, node.id), snapshot=snap)
+
+
+@router.get(ENV + "/attack-paths")
+def exposure_paths(
+    org: UUID,
+    env: UUID,
+    request: Request,
+    source: str | None = Query(None, max_length=80),
+    destination: str | None = Query(None, max_length=80),
+    max_steps: int = Query(2, ge=1, le=3),
+    max_paths: int = Query(100, ge=1, le=300),
+    effective_at: datetime | None = None,
+    known_at: datetime | None = None,
+):
+    with scoped(request, org, env, "findings:read") as scope:
+        snap = snapshot_for(scope, effective_at, known_at)
+        start = resolve(snap, source).id if source else None
+        target = resolve(snap, destination).id if destination else None
+        result = attack_paths(snap, scope.conn, start, target, max_steps, max_paths)
+        return envelope(
+            scope,
+            result,
+            snapshot=snap,
+            completeness="complete" if result["complete"] else "partial",
+            evidence_ids=[e for p in result["paths"] for e in p["evidence_ids"]],
+        )

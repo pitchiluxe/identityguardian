@@ -17,9 +17,12 @@ def test_forged_cookies_cannot_reset_login_rate_limit():
         create_app(Settings()), base_url="http://localhost:8000", client=("192.0.2.99", 1234)
     ) as browser:
         responses = []
-        for _ in range(61):
+        # 121 requests: even if a minute window boundary splits them, one window exceeds 60.
+        for _ in range(121):
             browser.cookies.set("ig_session", secrets.token_urlsafe(32))
             responses.append(browser.get("/api/v1/auth/login", follow_redirects=False).status_code)
+            if responses[-1] == 429:
+                break
     assert 429 in responses
 
 
