@@ -16,6 +16,7 @@ import { Machines } from './Machines';
 import { AttackPaths } from './Paths';
 import { Policies } from './Policies';
 import { Radar } from './Radar';
+import { Reports } from './Reports';
 import { Reviews } from './Reviews';
 import { TimeMachine } from './TimeMachine';
 import { Applications, GraphExplorer, Identities } from './Twin';
@@ -62,6 +63,7 @@ export const PAGES: Record<string, PageDef> = {
   'AI assistant': { subtitle: 'Local model explanations of authorized evidence. Advisory only.', capability: 'investigation:run', render: ctx => <Investigate {...ctx}/> },
   Policies: { subtitle: 'Declarative policy versions: validate, test, simulate, approve, activate.', capability: 'findings:read', render: ctx => <Policies {...ctx}/> },
   Labs: { subtitle: 'Hands-on IAM exercises in isolated, learner-only LAB clones.', org: true, render: ctx => <Labs {...ctx}/> },
+  Reports: { subtitle: 'Evidence-cited, redacted, expiring exports.', capability: 'report:read', render: ctx => <Reports {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Sandbox connector, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
   Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <><Administration org={ctx.org} session={ctx.session} can={ctx.can}/>{ctx.can('connector:manage') && <EnvironmentForm org={ctx.org} session={ctx.session}/>}</> },

@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 from apps.api.app.connectors.runner import run_job
 from apps.api.app.db import Database
-from apps.api.app.domain.execution import execute_change, expire_jit, reconcile
+from apps.api.app.domain.execution import execute_change, expire_jit, purge_reports, reconcile
 
 log = logging.getLogger("identityguardian.worker")
 
@@ -59,6 +59,7 @@ def tick(db: Database, organization_id: UUID):
         pass
     expire_jit(db, organization_id)
     reconcile(db, organization_id)
+    purge_reports(db, organization_id)
 
 
 def organizations(db: Database):

@@ -410,3 +410,12 @@ def overdue(conn, now=None):
         "SELECT * FROM jit_grants WHERE status IN ('ACTIVE','REVOKE_PENDING') AND expires_at<=%s",
         (now - OVERDUE_GRACE,),
     ).fetchall()
+
+
+def purge_reports(db, org):
+    """Expired report content is removed; the metadata row remains for the audit trail."""
+    with db.transaction(org) as conn:
+        return conn.execute(
+            "UPDATE report_artifacts SET content=NULL, status='EXPIRED' WHERE status='AVAILABLE' "
+            "AND expires_at<=now()"
+        ).rowcount

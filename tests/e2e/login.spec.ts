@@ -10,8 +10,7 @@ test('real OIDC login shows scoped workspace and logout revokes session', async 
   await page.getByRole('button', { name: 'Administration', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Organization members' })).toBeVisible();
   await expect(page.getByRole('cell', { name: 'Sam Contoso', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Reports Planned', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Reports is planned' })).toBeVisible();
+  await expect(page.getByText('Planned', { exact: true })).toHaveCount(0); // every module is implemented
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page.getByRole('link', { name: 'Sign in with your identity provider' })).toBeVisible();
   expect((await page.request.get('/api/v1/session')).status()).toBe(401);

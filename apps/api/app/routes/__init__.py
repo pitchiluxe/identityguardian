@@ -8,6 +8,7 @@ from . import (
     labs,
     lifecycle,
     policies,
+    reports,
     reviews,
     twin,
 )
@@ -24,4 +25,5 @@ ROUTERS = [
     policies.router,
     labs.router,
     connectors.router,
+    reports.router,
 ]
