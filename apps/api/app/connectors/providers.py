@@ -216,8 +216,26 @@ class MockOkta(PagedMock):
 PROVIDERS = {"mock_entra": MockEntra, "mock_okta": MockOkta}
 
 
-def build(connector_row) -> Connector:
+def build(connector_row, settings=None) -> Connector:
     kind = connector_row["kind"]
+    if kind == "entra":
+        from ..config import Settings
+        from ..secrets_envelope import open_envelope
+        from . import entra
+
+        settings = settings or Settings()
+        try:
+            secret = open_envelope(
+                connector_row["secret_envelope"],
+                settings.secret_master_key,
+                f"connector:{connector_row['id']}",
+                settings.secret_master_key_previous,
+            )
+        except Exception:  # noqa: BLE001 - any failure to open is reported without detail
+            raise ConnectorUnavailable(
+                "Connector secret cannot be opened with the configured keys"
+            ) from None
+        return entra.EntraConnector(connector_row.get("config") or {}, secret)
     if kind not in PROVIDERS:
         raise ValueError(f"No paged provider for {kind}")
     return PROVIDERS[kind](connector_row.get("config") or {})
