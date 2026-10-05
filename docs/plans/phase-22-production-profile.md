@@ -12,3 +12,10 @@ With `DEVELOPMENT=false`, the platform shows no demo data, names, placeholders o
 - Full pytest: 297 passed, 1 failed (`test_policies.py::test_reject_proposed_blocks_new_grants_and_policy_change_invalidates_approval`, 409 "twin changed since simulation"). It passed 3/3 alone and 6/6 with its file in parallel. Cause not identified, and Phase 22 does not touch policy or graph code. Recorded as an unexplained flake.
 - Playwright full: 27 passed, 1 failed (`shell.spec.ts` expected the removed "Local build · synthetic data" landing label; test updated, 3/3 pass), 1 skipped.
 - `npm run build` clean; ruff check/format clean; secret scan 0 findings.
+- Final review by a fresh reviewer (Opus): 1 Critical, 3 Important, 8 Minor. Fixed test-first:
+  - **Critical:** `init-organization` now also issues an independent first **approver** invite, which must use a different email. Without it, privileged invites and approvals could never complete.
+  - Mock connectors left over from development can no longer sync (422) or accept webhooks in production.
+  - Demo names and wording are gated on development mode in every page except the dev-only DevTools and Labs. The test is now whitelist-based.
+  - Mode **fails closed**: `development` defaults to false, every compose application service sets `DEVELOPMENT=false`, and the web treats a missing mode as production.
+  - The user manual and README no longer claim "all data is synthetic" for production.
+- After fixes: pytest 303 passed; Playwright 28 passed, 1 skipped; ruff check/format clean; secret scan 0 findings; build clean.

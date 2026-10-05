@@ -38,7 +38,7 @@ IdentityGuardian AI is an identity security and IAM training platform. It answer
 - **What did access look like at an earlier time?** The time machine.
 - **What would happen if we changed it?** The what-if simulator. Changes need a second person's approval.
 
-All data in this environment is **synthetic** (the fictional company "Contoso Global Technologies"). The platform is never connected to real identity systems and never changes real access.
+On a **production** installation, the data comes from your organization's identity sources once they are connected. The platform reads them; it never changes access in them (approved changes run only in a sandbox). The **local development** and training build uses a fictional company, "Contoso Global Technologies", with synthetic data; labs always use synthetic data.
 
 Public overview page: <https://identityguardian.vercel.app> · Source code: <https://github.com/pitchiluxe/identityguardian>
 
@@ -156,7 +156,7 @@ The left menu is grouped by purpose. Pages you are not authorized for say *"Rest
 | Learning | **Labs** | Hands-on IAM exercises with hints and scoring |
 | Operations | **Reports** | Evidence-cited reports and exports |
 | | **Audit logs** | Who did what, when and why; tamper-evident |
-| | **Integrations** | Mock and sandbox connectors and sync runs |
+| | **Integrations** | Identity sources and sync history |
 | | **Administration** | Members, role changes and **Invites** |
 
 **Two-person rule:** consequential actions (role changes, access changes, privileged invites, policies) are proposed by one person and approved by a **different** person. Nobody can approve their own request.
@@ -167,7 +167,7 @@ The left menu is grouped by purpose. Pages you are not authorized for say *"Rest
 
 > Only **org_admin** members can create invites. Only **approvers** can approve privileged ones.
 
-> **The very first administrator** of a new installation receives their invite link from the operator who ran `init-organization` (see `docs/operations/deployment.md`). Every later user is invited from the app as described below.
+> **The very first administrator** of a new installation (and the first **approver**, a different person) receive their invite links from the operator who ran `init-organization` (see `docs/operations/deployment.md`). Every later user is invited from the app as described below.
 
 ### Create an invite
 
@@ -258,7 +258,7 @@ Members ask for role changes by emailing **[erickomari243@gmail.com](mailto:eric
 
 ## 9. Things to know
 
-- **Synthetic data only.** Contoso and every person in it are fictional. Nothing connects to real directories or applications.
+- **Read-only toward your directories.** The platform reads identity sources; approved changes run only in a sandbox and never modify real directories. Contoso (development and labs) is fictional.
 - **AI is advisory.** The investigator answers from evidence with citations, but it can never approve or execute anything.
 - **Everything is audited.** Invites, approvals, refusals and role changes appear in **Audit logs**.
 - **Keep invite links private.** Each is a one-time key to an account with a specific role.

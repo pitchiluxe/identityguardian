@@ -102,48 +102,78 @@ def rotate_master_key(conn, settings, organization=None):
 SYSTEM_INVITER = UUID("00000000-0000-4000-8000-00000000b007")
 
 
-def init_organization(conn, name, admin_email, allow_additional=False):
-    """Create a real organization, its PRODUCTION environment and a one-time org_admin invite."""
+def init_organization(conn, name, admin_email, approver_email, allow_additional=False):
+    """Create a real organization, its PRODUCTION environment and two one-time bootstrap invites:
+    the first org_admin and an independent approver. Without the approver, privileged invites,
+    role changes and approvals could never be completed (two-person rule)."""
     from datetime import datetime, timedelta, timezone
 
     from apps.api.app.routes.invites import invite_digest
     from apps.api.app.security import digest
 
-    email = admin_email.strip().lower()
+    name = name.strip()
+    emails = [e.strip().lower() for e in (admin_email, approver_email)]
+    if not name:
+        raise SystemExit("Organization name is required.")
+    if emails[0] == emails[1]:
+        raise SystemExit("The approver must be a different person from the administrator.")
     conn.execute("SELECT pg_advisory_xact_lock(10002)")
     if not allow_additional and conn.execute("SELECT 1 FROM organizations").fetchone():
         raise SystemExit("Organizations already exist; pass --allow-additional to add another.")
-    org, env, invite = uuid4(), uuid4(), uuid4()
-    token = secrets.token_urlsafe(32)
+    org, env = uuid4(), uuid4()
     expires = datetime.now(timezone.utc) + timedelta(hours=72)
     conn.execute("SELECT set_config('app.org', %s, true)", (str(org),))
     conn.execute("INSERT INTO organizations VALUES (%s,%s)", (org, name))
     conn.execute(
-        "INSERT INTO environments(id,organization_id,name,kind) VALUES (%s,%s,'Production','PRODUCTION')",
+        "INSERT INTO environments(id,organization_id,name,kind) "
+        "VALUES (%s,%s,'Production','PRODUCTION')",
         (env, org),
     )
-    conn.execute(
-        "INSERT INTO invites(id,organization_id,email_normalized,roles,token_hash,inviter_id,digest,"
-        "justification,status,expires_at,bootstrap) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,true)",
-        (
-            invite,
-            org,
-            email,
-            ["org_admin"],
-            digest(token),
-            SYSTEM_INVITER,
-            invite_digest(org, email, "org_admin", expires.isoformat()),
-            "Operator bootstrap of the first administrator",
-            expires,
-        ),
+    audit_sql = (
+        "INSERT INTO audit_events(id,organization_id,actor_id,action,target,after_state,"
+        "justification,result,correlation_id) VALUES (gen_random_uuid(),%s,%s,%s,%s,%s,"
+        "'Operator init-organization','succeeded',gen_random_uuid())"
     )
-    for action, target in (("organization.initialized", org), ("invite.created", invite)):
+    conn.execute(
+        audit_sql,
+        (org, SYSTEM_INVITER, "organization.initialized", str(org), Jsonb({"name": name})),
+    )
+    paths = {}
+    for email, role in zip(emails, ("org_admin", "approver")):
+        invite, token = uuid4(), secrets.token_urlsafe(32)
         conn.execute(
-            "INSERT INTO audit_events(id,organization_id,actor_id,action,target,justification,result,correlation_id) "
-            "VALUES (gen_random_uuid(),%s,%s,%s,%s,'Operator init-organization','succeeded',gen_random_uuid())",
-            (org, SYSTEM_INVITER, action, str(target)),
+            "INSERT INTO invites(id,organization_id,email_normalized,roles,token_hash,inviter_id,"
+            "digest,justification,status,expires_at,bootstrap) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,true)",
+            (
+                invite,
+                org,
+                email,
+                [role],
+                digest(token),
+                SYSTEM_INVITER,
+                invite_digest(org, email, role, expires.isoformat()),
+                f"Operator bootstrap of the first {role}",
+                expires,
+            ),
         )
-    return dict(organization_id=org, environment_id=env, invite_path=f"/invite/{token}")
+        conn.execute(
+            audit_sql,
+            (
+                org,
+                SYSTEM_INVITER,
+                "invite.created",
+                str(invite),
+                Jsonb({"email": email, "roles": [role], "status": "ACTIVE", "bootstrap": True}),
+            ),
+        )
+        paths[role] = f"/invite/{token}"
+    return dict(
+        organization_id=org,
+        environment_id=env,
+        invite_path=paths["org_admin"],
+        approver_invite_path=paths["approver"],
+    )
 
 
 def main():
@@ -161,6 +191,9 @@ def main():
     )
     parser.add_argument("--name", help="init-organization: organization name")
     parser.add_argument("--admin-email", help="init-organization: first administrator's email")
+    parser.add_argument(
+        "--approver-email", help="init-organization: first approver (different person)"
+    )
     parser.add_argument("--allow-additional", action="store_true", help="init-organization")
     parser.add_argument("--organization", type=UUID, help="rotate-master-key: one organization")
     parser.add_argument("--verify-audit", action="store_true", help="status: verify audit chains")
@@ -172,11 +205,16 @@ def main():
         if args.command == "status":
             raise SystemExit(status(conn, args.verify_audit))
         if args.command == "init-organization":
-            if not args.name or not args.admin_email:
-                raise SystemExit("init-organization needs --name and --admin-email")
-            made = init_organization(conn, args.name, args.admin_email, args.allow_additional)
+            if not (args.name and args.admin_email and args.approver_email):
+                raise SystemExit(
+                    "init-organization needs --name, --admin-email and --approver-email"
+                )
+            made = init_organization(
+                conn, args.name, args.admin_email, args.approver_email, args.allow_additional
+            )
             print(f"Organization {made['organization_id']} created with a Production environment.")
             print(f"First administrator invite (single use, 72 hours): {made['invite_path']}")
+            print(f"First approver invite (single use, 72 hours): {made['approver_invite_path']}")
             print("Prefix it with APP_ORIGIN and send it only to that person.")
             return
         if args.command == "rotate-master-key":

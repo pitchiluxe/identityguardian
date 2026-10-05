@@ -33,10 +33,10 @@ docker compose -f infra/compose.production.yaml ps     # all healthy; migrate ex
 Create the real organization and its first administrator once:
 
 ```
-docker compose -f infra/compose.production.yaml run --rm migrate   python scripts/manage.py init-organization --name "Your Organization" --admin-email admin@your-domain
+docker compose -f infra/compose.production.yaml run --rm migrate   python scripts/manage.py init-organization --name "Your Organization" --admin-email admin@your-domain --approver-email approver@your-domain
 ```
 
-The command creates the organization, a **Production** environment and a single-use, 72-hour org_admin invite. It prints `/invite/<token>`: prefix it with `APP_ORIGIN` and send it only to that administrator, who registers their own password and one-time code. It refuses to run if an organization already exists (use `--allow-additional` deliberately). The synthetic `bootstrap` command is refused outside development.
+The command creates the organization, a **Production** environment and two single-use, 72-hour invites: the first **org_admin** and an independent first **approver** (a different person — the two-person rule needs both before privileged invites, role changes or approvals can complete). It prints both `/invite/<token>` paths: prefix each with `APP_ORIGIN` and send it only to its person, who registers their own password and one-time code. It refuses to run if an organization already exists (use `--allow-additional` deliberately). The synthetic `bootstrap` command is refused outside development.
 
 ## Configuration
 

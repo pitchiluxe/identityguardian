@@ -83,3 +83,51 @@ def test_session_and_overview_report_mode(client, prod_client, tenant):
         overview = c.get(f"/api/v1/organizations/{org}/overview").json()
         assert overview["deployment"] == {"mode": mode}
         assert "phase" not in overview and "identity_data" not in overview
+
+
+def test_existing_mock_connectors_cannot_sync_in_production(client, prod_client, twin):
+    # A database once used in development may still hold mock connectors.
+    created = client.post(
+        twin["base"] + "/connectors",
+        headers=as_user(client, twin["people"], "admin"),
+        json=dict(
+            kind="mock_entra",
+            name="Leftover mock",
+            endpoint="mock://mock_entra/x",
+            authoritative=True,
+        ),
+    )
+    assert created.status_code == 201, created.text
+    connector = created.json()["data"]["id"]
+    h = headers(prod_client, twin["people"], "admin")
+    response = prod_client.post(
+        twin["base"] + f"/connectors/{connector}/sync", headers=h, json={"mode": "full"}
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"] == "Connector kind not available in production"
+
+
+def test_settings_fail_closed_to_production(monkeypatch):
+    monkeypatch.delenv("DEVELOPMENT", raising=False)
+    settings = Settings(
+        _env_file=None,
+        secure_cookies=True,
+        app_origin="https://iam.example.com",
+        oidc_issuer_url="https://idp.example.com/realms/identityguardian",
+    )
+    assert settings.development is False
+
+
+def test_production_compose_sets_mode_for_every_app_service():
+    # YAML merge keys are shallow: a service's own `environment` replaces the anchor's, so each
+    # application service must set the mode itself.
+    import re
+    from pathlib import Path
+
+    compose = (
+        Path(__file__).resolve().parents[2] / "infra" / "compose.production.yaml"
+    ).read_text()
+    for service in ("migrate", "api", "worker"):
+        pattern = r"\n  " + service + r":\n(.*?)(?=\n  [a-z]+:\n|\nnetworks:)"
+        block = re.search(pattern, compose, re.S)
+        assert block and 'DEVELOPMENT: "false"' in block.group(1), service

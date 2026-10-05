@@ -52,7 +52,7 @@ export function App() {
   const envCaps = envCapabilities.data?.data;
   const can = (capability: string) => (envCaps ?? overview?.capabilities ?? []).includes(capability);
   const environment = envs.data?.data.find(e => e.id === env);
-  const dev = session.deployment?.mode !== 'production';
+  const dev = session.deployment?.mode === 'development';  // missing mode = production
   const ctx: Ctx = { org, env, session, dev, can, base: `/organizations/${org}/environments/${env}`, envKind: environment?.kind || '', navigate, params, selectEnv: (id: string) => { setEnv(id); setRevision(v => v + 1); } };
   const renderer = PAGES[page];
   let body: ReactNode;

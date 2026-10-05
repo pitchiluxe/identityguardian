@@ -18,9 +18,17 @@ MIGRATOR, RUNTIME = os.environ["MIGRATION_DATABASE_URL"], os.environ["DATABASE_U
 def test_init_creates_org_env_and_bootstrap_invite_once():
     name = f"Init Test {uuid4().hex[:6]}"
     with psycopg.connect(MIGRATOR) as conn:
-        made = init_organization(conn, name, "First.Admin@Example.org ", allow_additional=True)
+        made = init_organization(
+            conn,
+            name,
+            "First.Admin@Example.org ",
+            "first.approver@example.org",
+            allow_additional=True,
+        )
         with pytest.raises(SystemExit):
-            init_organization(conn, name, "x@example.org")  # orgs exist; no --allow-additional
+            init_organization(
+                conn, name, "x@example.org", "y@example.org"
+            )  # orgs exist; no --allow-additional
         org = made["organization_id"]
         assert conn.execute(
             "SELECT kind FROM environments WHERE organization_id=%s", (org,)
@@ -63,3 +71,25 @@ def test_synthetic_bootstrap_refuses_outside_development():
     )
     assert result.returncode != 0
     assert "disabled outside development" in result.stderr
+
+
+def test_init_issues_independent_approver_invite():
+    name = f"Init Approver {uuid4().hex[:6]}"
+    with psycopg.connect(MIGRATOR) as conn:
+        with pytest.raises(SystemExit):
+            init_organization(conn, name, "a@example.org", "A@Example.org", allow_additional=True)
+        made = init_organization(
+            conn, name, "admin@example.org", "approver@example.org", allow_additional=True
+        )
+    token = made["approver_invite_path"].rsplit("/", 1)[1]
+    with psycopg.connect(RUNTIME) as conn:
+        result = conn.execute(
+            "SELECT * FROM redeem_invite(%s,'https://idp.test',%s,'Approver','approver@example.org')",
+            (digest(token), str(uuid4())),
+        ).fetchone()
+    assert result[3] is None
+    with psycopg.connect(MIGRATOR) as conn:
+        roles = conn.execute(
+            "SELECT roles FROM memberships WHERE user_id=%s", (result[0],)
+        ).fetchone()[0]
+    assert roles == ["approver"]

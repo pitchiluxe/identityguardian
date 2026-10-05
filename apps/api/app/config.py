@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     oidc_issuer_url: str = "http://localhost:58080/realms/identityguardian"
     oidc_client_id: str = "identityguardian"
     secure_cookies: bool = False
-    development: bool = True
+    # Fails closed: production unless DEVELOPMENT=true is set (local_setup.py writes it).
+    development: bool = False
     session_idle_seconds: int = 1800
     session_absolute_seconds: int = 28800
     read_limit_per_minute: int = 60

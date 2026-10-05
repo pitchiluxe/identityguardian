@@ -37,4 +37,3 @@ export function KV({ rows }: { rows: [string, unknown][] }) {
   return <dl className="kv">{rows.map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{typeof v === 'object' && v !== null && !Array.isArray(v) ? fmt(v) : Array.isArray(v) ? v.map(x => fmt(x)).join(', ') || '—' : fmt(v)}</dd></div>)}</dl>;
 }
 
-export function Synthetic() { return <Tag tone="warn">SYNTHETIC</Tag>; }

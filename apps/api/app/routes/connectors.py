@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ..auth import require_session
 from ..connectors.base import validate_endpoint
-from ..connectors.providers import build
+from ..connectors.providers import PROVIDERS, build
 from ..jsonutil import jsonb as Jsonb
 from ..scope import development_only, envelope, scoped
 from ..secrets_envelope import open_envelope, seal
@@ -172,6 +172,9 @@ def faults(org: UUID, env: UUID, connector_id: UUID, body: FaultConfig, request:
 def sync(org: UUID, env: UUID, connector_id: UUID, body: SyncRequest, request: Request):
     with scoped(request, org, env, "connector:sync") as scope:
         row = connector_for(scope, connector_id)
+        if not request.app.state.settings.development and row["kind"] in PROVIDERS:
+            # Mock providers replay SYNTHETIC payloads; leftovers from development stay inert.
+            raise HTTPException(422, "Connector kind not available in production")
         if row["kind"] == "sandbox":
             raise HTTPException(409, "Use the sandbox sync endpoint for the sandbox connector")
         queue(scope, connector_id, body.mode)
@@ -203,6 +206,8 @@ async def webhook(org: UUID, env: UUID, connector_id: UUID, request: Request):
             "SELECT * FROM connectors WHERE id=%s AND environment_id=%s", (connector_id, env)
         ).fetchone()
         if not row or not row["secret_envelope"]:
+            raise HTTPException(401, "Webhook verification failed")
+        if not settings.development and row["kind"] in PROVIDERS:
             raise HTTPException(401, "Webhook verification failed")
         try:
             secret = open_envelope(

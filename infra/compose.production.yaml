@@ -34,6 +34,8 @@ services:
     <<: *app
     restart: "no"
     command: ["python", "scripts/manage.py", "migrate"]
+    environment:
+      DEVELOPMENT: "false"  # operator commands (init-organization) run in production mode
     secrets: [migration_database_url, runtime_password, worker_password]
     networks: [backend]
     depends_on: { postgres: { condition: service_healthy } }
@@ -56,6 +58,7 @@ services:
     <<: *app
     command: ["python", "-m", "apps.worker.main"]
     environment:
+      DEVELOPMENT: "false"
       WORKER_HEARTBEAT_FILE: /tmp/worker-heartbeat
     secrets: [worker_database_url, secret_master_key]
     networks: [backend]
