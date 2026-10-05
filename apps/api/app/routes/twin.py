@@ -38,7 +38,10 @@ def times(effective_at, known_at):
 
 def snapshot_for(scope, effective_at=None, known_at=None):
     t, k = times(effective_at, known_at)
-    return graph.load(scope.conn, scope.env_id, t, k)
+    # No known_at means current knowledge: pass None so the snapshot is versioned by the
+    # environment's change counter. Passing "now" made the version depend on whether a clock
+    # tick elapsed before graph.load's own now() (intermittent 409 on simulate -> approve).
+    return graph.load(scope.conn, scope.env_id, t, k if known_at is not None else None)
 
 
 def resolve(snapshot, node_id: str):

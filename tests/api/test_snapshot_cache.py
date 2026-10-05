@@ -7,6 +7,7 @@ import pytest
 
 from apps.api.app.db import Database
 from apps.api.app.domain import graph
+from tests.api.conftest import as_user
 from tests.api.support import source_update, sync
 
 
@@ -106,3 +107,31 @@ def test_runtime_role_cannot_forge_watermark(client, twin, statement):
                 conn.execute(statement, dict(org=twin["org"], env=twin["env"]))
     finally:
         db.close()
+
+
+def test_current_snapshot_version_survives_a_clock_tick(client, twin, monkeypatch):
+    # Root cause of the intermittent 409 "twin changed since simulation": snapshot_for() turned a
+    # missing known_at into "now", and graph.load() treated it as current only if no clock tick
+    # passed before its own now() (Windows ticks ~15 ms). Under load the tick passed, the request
+    # fell back to the timestamp-based version, and simulate/approve versions differed.
+    import datetime as real
+
+    from apps.api.app.domain import graph
+
+    ticks = iter(range(1, 10_000))
+
+    class Later(real.datetime):
+        @classmethod
+        def now(cls, tz=None):  # every call lands on a later clock tick
+            return real.datetime.now(tz) + real.timedelta(milliseconds=20 * next(ticks))
+
+    as_user(client, twin["people"], "viewer")
+    from psycopg.rows import dict_row
+
+    with psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row) as conn:
+        conn.execute("SELECT set_config('app.org', %s, false)", (twin["org"],))
+        expected = graph.graph_version(conn, twin["env"])  # current (watermark) version
+    monkeypatch.setattr(graph, "datetime", Later)  # every later now() is past the request's "now"
+    response = client.get(twin["base"] + "/summary")
+    assert response.status_code == 200
+    assert response.json()["snapshot"]["graph_version"] == expected
