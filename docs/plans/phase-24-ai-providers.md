@@ -23,3 +23,5 @@ Approved by the user on 2026-10-05 ("approve 24", "proceed"). Spec: `docs/superp
   7. Real-SDK tests over a mocked HTTP transport were added.
 
   The OpenAI empty reply and the stale "Local model" subtitle were also fixed. Affected suites: 184 passed.
+- Final full run after the fixes: Playwright 29 passed, 1 skipped (no failures). pytest 329 passed, 1 failed: `test_policies.py::test_reversion_is_a_new_reviewed_version`, 409 "twin changed since simulation". It passed 3/3 alone.
+- **Open item:** the same 409 has now appeared in two different policy tests during full parallel runs (Phase 22 and here), never in isolation. The suspected cause is a time-dependent graph version between simulate and approve, which a loaded host makes worse. This is not proven and needs a dedicated investigation. Phase 24 does not touch policy or graph code.
