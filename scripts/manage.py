@@ -3,9 +3,10 @@
 import argparse
 import json
 import os
+import secrets
 import sys
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import psycopg
 from dotenv import load_dotenv
@@ -98,11 +99,69 @@ def rotate_master_key(conn, settings, organization=None):
     return counts
 
 
+SYSTEM_INVITER = UUID("00000000-0000-4000-8000-00000000b007")
+
+
+def init_organization(conn, name, admin_email, allow_additional=False):
+    """Create a real organization, its PRODUCTION environment and a one-time org_admin invite."""
+    from datetime import datetime, timedelta, timezone
+
+    from apps.api.app.routes.invites import invite_digest
+    from apps.api.app.security import digest
+
+    email = admin_email.strip().lower()
+    conn.execute("SELECT pg_advisory_xact_lock(10002)")
+    if not allow_additional and conn.execute("SELECT 1 FROM organizations").fetchone():
+        raise SystemExit("Organizations already exist; pass --allow-additional to add another.")
+    org, env, invite = uuid4(), uuid4(), uuid4()
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + timedelta(hours=72)
+    conn.execute("SELECT set_config('app.org', %s, true)", (str(org),))
+    conn.execute("INSERT INTO organizations VALUES (%s,%s)", (org, name))
+    conn.execute(
+        "INSERT INTO environments(id,organization_id,name,kind) VALUES (%s,%s,'Production','PRODUCTION')",
+        (env, org),
+    )
+    conn.execute(
+        "INSERT INTO invites(id,organization_id,email_normalized,roles,token_hash,inviter_id,digest,"
+        "justification,status,expires_at,bootstrap) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,true)",
+        (
+            invite,
+            org,
+            email,
+            ["org_admin"],
+            digest(token),
+            SYSTEM_INVITER,
+            invite_digest(org, email, "org_admin", expires.isoformat()),
+            "Operator bootstrap of the first administrator",
+            expires,
+        ),
+    )
+    for action, target in (("organization.initialized", org), ("invite.created", invite)):
+        conn.execute(
+            "INSERT INTO audit_events(id,organization_id,actor_id,action,target,justification,result,correlation_id) "
+            "VALUES (gen_random_uuid(),%s,%s,%s,%s,'Operator init-organization','succeeded',gen_random_uuid())",
+            (org, SYSTEM_INVITER, action, str(target)),
+        )
+    return dict(organization_id=org, environment_id=env, invite_path=f"/invite/{token}")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "command", choices=["migrate", "bootstrap", "analyze", "status", "rotate-master-key"]
+        "command",
+        choices=[
+            "migrate",
+            "bootstrap",
+            "analyze",
+            "status",
+            "rotate-master-key",
+            "init-organization",
+        ],
     )
+    parser.add_argument("--name", help="init-organization: organization name")
+    parser.add_argument("--admin-email", help="init-organization: first administrator's email")
+    parser.add_argument("--allow-additional", action="store_true", help="init-organization")
     parser.add_argument("--organization", type=UUID, help="rotate-master-key: one organization")
     parser.add_argument("--verify-audit", action="store_true", help="status: verify audit chains")
     args = parser.parse_args()
@@ -112,6 +171,14 @@ def main():
     with psycopg.connect(secret("MIGRATION_DATABASE_URL"), connect_timeout=5) as conn:
         if args.command == "status":
             raise SystemExit(status(conn, args.verify_audit))
+        if args.command == "init-organization":
+            if not args.name or not args.admin_email:
+                raise SystemExit("init-organization needs --name and --admin-email")
+            made = init_organization(conn, args.name, args.admin_email, args.allow_additional)
+            print(f"Organization {made['organization_id']} created with a Production environment.")
+            print(f"First administrator invite (single use, 72 hours): {made['invite_path']}")
+            print("Prefix it with APP_ORIGIN and send it only to that person.")
+            return
         if args.command == "rotate-master-key":
             from apps.api.app.config import Settings
 
@@ -147,6 +214,12 @@ def main():
                     conn.execute("INSERT INTO schema_migrations VALUES (%s)", (path.name,))
                     print("Applied", path.name)
         else:
+            from apps.api.app.config import Settings
+
+            if not Settings().development:
+                raise SystemExit(
+                    "bootstrap creates SYNTHETIC data and is disabled outside development"
+                )
             conn.execute("SELECT pg_advisory_xact_lock(10001)")
             if conn.execute("SELECT 1 FROM organizations").fetchone():
                 raise SystemExit("Bootstrap already completed; refusing to overwrite memberships.")
