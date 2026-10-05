@@ -10,6 +10,7 @@ import httpx
 import jwt
 from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse
+from psycopg.types.json import Jsonb
 
 from .security import capabilities, digest, validate_claims
 
@@ -72,8 +73,38 @@ def begin_login(request: Request):
     return _begin(request)
 
 
-def begin_registration(request: Request, invite: str = ""):
-    """Start IdP self-registration for an invite. Every unusable token gets the same response."""
+def audit_refusal(request: Request, claims: dict, refusal: dict):
+    """Record a refused redemption in the invite's tenant (own transaction, so it survives the
+    403). An unknown token has no tenant and is logged with the correlation ID only."""
+    log = logging.getLogger("identityguardian")
+    correlation = getattr(request.state, "correlation", None)
+    if refusal["organization_id"] is None:
+        log.info("Invite redemption refused: unknown token (correlation %s)", correlation)
+        return
+    with request.app.state.db.transaction(refusal["organization_id"]) as conn:
+        conn.execute(
+            "INSERT INTO audit_events(id,organization_id,action,target,after_state,justification,"
+            "result,correlation_id) VALUES(gen_random_uuid(),%s,'invite.redemption_refused',%s,%s,"
+            "'Invite redemption refused at sign-in','refused',%s)",
+            (
+                refusal["organization_id"],
+                str(refusal["invite_id"]),
+                Jsonb(
+                    dict(
+                        reason=refusal["reason"],
+                        issuer=claims["iss"],
+                        subject=claims["sub"],
+                        claimed_email=str(claims.get("email") or "")[:254],
+                    )
+                ),
+                correlation,
+            ),
+        )
+
+
+def begin_registration(request: Request, invite: str = "", mode: str = "register"):
+    """Start IdP registration (or sign-in, for existing accounts) for an invite. Every unusable
+    token gets the same response."""
     token = invite.strip()
     usable = False
     if 20 <= len(token) <= 128:
@@ -83,7 +114,8 @@ def begin_registration(request: Request, invite: str = ""):
             ]
     if not usable:
         return RedirectResponse("/invite/invalid", status_code=303)
-    return _begin(request, endpoint="registrations", invite_hash=digest(token))
+    endpoint = "auth" if mode == "login" else "registrations"
+    return _begin(request, endpoint=endpoint, invite_hash=digest(token))
 
 
 def _begin(request: Request, endpoint="auth", invite_hash=None):
@@ -185,6 +217,7 @@ def complete_login(request: Request):
     auth_time = claims.get("auth_time", 0)
     if not isinstance(auth_time, (int, float)) or auth_time > time.time():
         auth_time = 0
+    refusal = None
     with db.transaction() as conn:
         user = conn.execute(
             "SELECT id FROM users WHERE issuer=%s AND subject=%s", (claims["iss"], claims["sub"])
@@ -202,28 +235,32 @@ def complete_login(request: Request):
                 ),
             ).fetchone()
             if redeemed["reason"]:
-                logging.getLogger("identityguardian").info(
-                    "Invite redemption refused: %s", redeemed["reason"]
-                )
-                raise HTTPException(403, REFUSALS[redeemed["reason"]])
-            user = {"id": redeemed["user_id"]}
+                refusal = redeemed  # refusals wrote nothing; audit after this transaction
+            else:
+                user = {"id": redeemed["user_id"]}
         elif not user:
             raise HTTPException(403, "This identity has not been provisioned for the platform")
-        conn.execute(
-            "DELETE FROM sessions WHERE token_hash=%s",
-            (digest(request.cookies.get("ig_session", "")),),
-        )
-        conn.execute(
-            "INSERT INTO sessions(token_hash,user_id,csrf_hash,expires_at,auth_time,amr) VALUES(%s,%s,%s,%s,%s,%s)",
-            (
-                digest(raw),
-                user["id"],
-                digest(csrf),
-                datetime.now(timezone.utc) + timedelta(seconds=settings.session_absolute_seconds),
-                auth_time,
-                amr,
-            ),
-        )
+        if refusal is None:
+            conn.execute(
+                "DELETE FROM sessions WHERE token_hash=%s",
+                (digest(request.cookies.get("ig_session", "")),),
+            )
+            conn.execute(
+                "INSERT INTO sessions(token_hash,user_id,csrf_hash,expires_at,auth_time,amr) "
+                "VALUES(%s,%s,%s,%s,%s,%s)",
+                (
+                    digest(raw),
+                    user["id"],
+                    digest(csrf),
+                    datetime.now(timezone.utc)
+                    + timedelta(seconds=settings.session_absolute_seconds),
+                    auth_time,
+                    amr,
+                ),
+            )
+    if refusal is not None:
+        audit_refusal(request, claims, refusal)
+        raise HTTPException(403, REFUSALS[refusal["reason"]])
     response = RedirectResponse("/", status_code=303)
     response.delete_cookie("ig_login", path="/api/v1/auth")
     response.set_cookie(

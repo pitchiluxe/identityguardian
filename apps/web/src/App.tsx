@@ -47,7 +47,7 @@ export function App() {
   const signOut = async () => { try { await api('/auth/logout', 'POST', undefined, session?.csrf_token); setSession(null); setOverview(null); } catch (e) { setError((e as Error).message); } };
   if (loading) return <main className="loading"><ShieldCheck size={32}/><p>Opening your workspace…</p></main>;
   const inviteToken = window.location.pathname.match(/^\/invite\/([^/]+)$/)?.[1];
-  if (!session && inviteToken) return <InviteLanding token={safeDecode(inviteToken)}/>;
+  if (inviteToken) return <InviteLanding token={safeDecode(inviteToken)} signedInAs={session?.user.name}/>;
   if (!session) return <Landing error={error}/>;
 
   const envCaps = envCapabilities.data?.data;
@@ -98,13 +98,14 @@ function Landing({ error }: { error: string }) {
     </section></main><footer>IdentityGuardian AI <span>Investigate. Explain. Approve.</span></footer></div>;
 }
 
-function InviteLanding({ token }: { token: string }) {
+function InviteLanding({ token, signedInAs }: { token: string; signedInAs?: string }) {
   const invalid = token === 'invalid';
   return <div className="entry"><header><Brand/><span className="pill">{BUILD_LABEL}</span></header><main className="entry-grid"><section className="entry-copy">
     <h1>{invalid ? 'This invite cannot be used' : "You've been invited"}</h1>
     <p className="entry-description">{invalid ? 'It may have expired, been used or been revoked. Ask your administrator for a new invite.' : 'Create your own account with a password and an authenticator app. Your access is set by the invite.'}</p>
     {!invalid && <><a className="primary login" href={`/api/v1/auth/register?invite=${encodeURIComponent(token.trim())}`}>Create account <ArrowUpRight size={18}/></a>
-      <a className="secondary" href="/api/v1/auth/login">I already have an account</a></>}
+      <a className="secondary" href={`/api/v1/auth/register?invite=${encodeURIComponent(token.trim())}&mode=login`}>I already have an account</a>
+      {signedInAs && <p className="entry-note">You are signed in as {signedInAs}. Continuing starts a new sign-in for the invited account.</p>}</>}
   </section></main></div>;
 }
 

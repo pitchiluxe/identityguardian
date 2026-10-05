@@ -9,3 +9,9 @@ People register their own IdP credentials (password plus mandatory TOTP). Platfo
 - `tests/e2e/invite.spec.ts` against real local Keycloak: alex creates a viewer invite, a new browser context registers, enrols TOTP and lands in the workspace. 1 passed.
 - Full run: ruff check/format clean, secret scan 0 findings; pytest 279 passed, 1 skipped; Playwright 28 passed, 1 skipped (opt-in capture).
 - Transient: one auth-suite run during Task 3 had 2 fixture errors (503, DB connect timeout under host load). Rerun 36 passed.
+- Final whole-branch review by a fresh reviewer (Opus): 0 Critical, 4 Important, 8 Minor. All four Important findings were fixed test-first, each test watched failing before the fix:
+  1. Refused redemptions are audited in the tenant (`invite.redemption_refused`).
+  2. `migrations/024_invite_hardening.sql` adds DB CHECKs for privileged approval and REDEEMED ⇔ redeemed_by, plus a final-state trigger.
+  3. "I already have an account" carries the invite (`mode=login`).
+  4. The invite landing page is shown to signed-in users.
+- After the fixes: pytest 285 passed; invite E2E 2 passed; ruff clean. Eight Minor findings are deferred and listed in the session report: freshness check, token_hash column grant, tokens in access logs, success-audit correlation/outbox, inactive re-invite, concurrent new-subject race, test gaps, trailing slash and raw-JSON 403.

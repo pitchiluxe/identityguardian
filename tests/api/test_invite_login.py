@@ -107,3 +107,55 @@ def test_invite_deep_link_serves_shell_without_invite_details(client, tenant):
         assert response.status_code == 200 and "<div id=" in response.text
         assert "pat@example.org" not in response.text and str(org) not in response.text
         assert response.headers["content-security-policy"].startswith("default-src 'self'")
+
+
+def test_refused_redemption_is_audited_in_the_tenant(client, tenant, monkeypatch):
+    org, _, people = tenant
+    made = create(client, org, people)
+    _, params = start(client, made["link"].split("/")[-1])
+    settings, subject = Settings(), str(uuid4())
+    fake_idp(
+        monkeypatch, settings, params, claims(settings, params, subject, email="other@example.org")
+    )
+    done = client.get(
+        f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False
+    )
+    assert done.status_code == 403 and "ig_session" not in done.headers.get("set-cookie", "")
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        row = conn.execute(
+            "SELECT target, after_state, result FROM audit_events WHERE organization_id=%s "
+            "AND action='invite.redemption_refused'",
+            (org,),
+        ).fetchone()
+    assert row is not None and row[0] == made["invite"]["id"]
+    assert row[1]["reason"] == "email_mismatch" and row[1]["subject"] == subject
+    assert row[2] == "refused"
+
+
+def test_existing_account_signs_in_and_redeems(client, tenant, monkeypatch):
+    org, _, people = tenant
+    settings, subject = Settings(), str(uuid4())
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        conn.execute(
+            "INSERT INTO users VALUES (gen_random_uuid(),%s,%s,'Existing Person')",
+            (settings.oidc_issuer_url, subject),
+        )
+    token = create(client, org, people, role="auditor")["link"].split("/")[-1]
+    client.cookies.clear()
+    response = client.get(
+        f"/api/v1/auth/register?invite={token}&mode=login", follow_redirects=False
+    )
+    assert "/protocol/openid-connect/auth?" in response.headers["location"]
+    params = parse_qs(urlparse(response.headers["location"]).query)
+    fake_idp(monkeypatch, settings, params, claims(settings, params, subject))
+    done = client.get(
+        f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False
+    )
+    assert done.status_code == 303
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        roles = conn.execute(
+            "SELECT m.roles FROM memberships m JOIN users u ON u.id=m.user_id "
+            "WHERE u.subject=%s AND m.organization_id=%s",
+            (subject, org),
+        ).fetchone()[0]
+    assert roles == ["auditor"]

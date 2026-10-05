@@ -10,6 +10,10 @@ test('invitee registers own credentials and lands with the invited role', async 
   await page.getByLabel('Invite justification').fill('SYNTHETIC end-to-end invitee');
   await page.getByRole('button', { name: 'Create invite' }).click();
   const link = await page.locator('.notice code').innerText();
+  // A signed-in user opening an invite link still sees the invite, with a fresh-sign-in notice.
+  await page.goto(link);
+  await expect(page.getByRole('heading', { name: "You've been invited" })).toBeVisible();
+  await expect(page.getByText(/signed in as/i)).toBeVisible();
   const invitee = await (await browser.newContext()).newPage();
   await invitee.goto(link);
   await invitee.getByRole('link', { name: 'Create account' }).click();

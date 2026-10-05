@@ -52,7 +52,7 @@ def redeem(token_hash, subject=None, email="New.Person@Example.org "):
 
 def test_redeem_creates_user_membership_and_is_single_use():
     org, token_hash = seed()
-    user_id, organization_id, reason = redeem(token_hash)
+    user_id, organization_id, _, reason = redeem(token_hash)
     assert reason is None and organization_id == org
     with psycopg.connect(MIGRATOR) as conn:
         roles = conn.execute(
@@ -66,7 +66,7 @@ def test_redeem_creates_user_membership_and_is_single_use():
             (org,),
         ).fetchone()[0]
     assert roles == ["viewer"] and status == "REDEEMED" and audited == 1
-    assert redeem(token_hash)[2] == "invalid"  # replay
+    assert redeem(token_hash)[3] == "invalid"  # replay
 
 
 @pytest.mark.parametrize(
@@ -79,12 +79,13 @@ def test_redeem_creates_user_membership_and_is_single_use():
     ],
 )
 def test_refusals(kwargs, reason):
-    _, token_hash = seed(**kwargs)
-    assert redeem(token_hash) == (None, None, reason)
+    org, token_hash = seed(**kwargs)
+    user_id, organization_id, invite_id, got = redeem(token_hash)
+    assert (user_id, organization_id, got) == (None, org, reason) and invite_id is not None
 
 
 def test_unknown_token_is_invalid():
-    assert redeem(digest("not-a-token")) == (None, None, "invalid")
+    assert redeem(digest("not-a-token")) == (None, None, None, "invalid")
 
 
 def test_existing_member_is_refused_and_roles_unchanged():
@@ -98,7 +99,7 @@ def test_existing_member_is_refused_and_roles_unchanged():
             "INSERT INTO memberships(organization_id,user_id,roles) VALUES (%s,%s,%s)",
             (org, uid, ["viewer"]),
         )
-    assert redeem(token_hash, subject)[2] == "already_member"
+    assert redeem(token_hash, subject)[3] == "already_member"
     with psycopg.connect(MIGRATOR) as conn:
         assert conn.execute(
             "SELECT roles FROM memberships WHERE organization_id=%s AND user_id=%s", (org, uid)
@@ -120,8 +121,8 @@ def test_concurrent_redeem_yields_one_membership():
                 (token_hash, str(uuid4()), "new.person@example.org"),
             )
         a.execute("COMMIT")
-    assert first[2] is None
-    assert redeem(token_hash)[2] == "invalid"
+    assert first[3] is None
+    assert redeem(token_hash)[3] == "invalid"
 
 
 def test_runtime_role_cannot_bypass_function():
@@ -158,3 +159,21 @@ def test_invite_usable_only_for_active_unexpired():
             for h in (active, pending, expired, digest("unknown"))
         ]
     assert usable == [True, False, False, False]
+
+
+@pytest.mark.parametrize(
+    "status,roles,update",
+    [
+        ("PENDING_APPROVAL", ("org_admin",), "UPDATE invites SET status='ACTIVE'"),
+        ("REDEEMED", ("viewer",), "UPDATE invites SET status='ACTIVE'"),
+        ("REVOKED", ("viewer",), "UPDATE invites SET status='ACTIVE'"),
+    ],
+)
+def test_runtime_role_cannot_skip_approval_or_reuse(status, roles, update):
+    org, token_hash = seed(status="ACTIVE" if status == "REDEEMED" else status, roles=roles)
+    if status == "REDEEMED":
+        assert redeem(token_hash)[3] is None
+    with psycopg.connect(RUNTIME) as conn:
+        conn.execute("SELECT set_config('app.org', %s, false)", (str(org),))
+        with pytest.raises(psycopg.errors.CheckViolation):
+            conn.execute(update + " WHERE token_hash=%s", (token_hash,))
