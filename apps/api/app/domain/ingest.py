@@ -555,6 +555,14 @@ class Ingestor:
             self.close_and_insert(
                 row["id"], row["attributes"], row["valid_from"], now, True, row["observation_id"]
             )
+            # Record the absence as the latest observation: if the same relationship returns
+            # with an identical payload, it must not be skipped as "unchanged" (re-granted access).
+            marker = {"absent_in_authoritative_read": True}
+            self.record(
+                dict(object_type="relationship", object_id=row["external_id"], version=0),
+                marker,
+                digest(canonical(marker)),
+            )
             self.counts["tombstoned"] += 1
 
 

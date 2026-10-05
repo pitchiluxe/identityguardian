@@ -286,3 +286,28 @@ def test_master_key_rotation_rewraps_and_withdrawn_key_fails_closed(client, twin
 
     settings.secret_master_key_previous = []  # old key retired after rotation
     assert client.post(url, content=body, headers=signed(body)).status_code == 202
+
+
+def test_access_removed_then_regranted_is_reopened(client, twin, worker):
+    # Regression (Phase 23 review): an authoritative read closed the membership without a new
+    # observation, so when the identical membership came back it was skipped as "unchanged".
+    connector = create(client, twin)
+    sync(client, twin, worker, connector)
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        member = conn.execute(
+            "SELECT external_id FROM relationships WHERE environment_id=%s AND source='mock_entra' "
+            "AND type='USER_MEMBER_OF_GROUP' ORDER BY external_id LIMIT 1",
+            (twin["env"],),
+        ).fetchone()[0]
+    faults(client, twin, connector, omit=[member])
+    assert sync(client, twin, worker, connector)["tombstoned"] == 1
+    faults(client, twin, connector, omit=[])
+    sync(client, twin, worker, connector)
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        open_revisions = conn.execute(
+            "SELECT count(*) FROM relationship_revisions rr JOIN relationships r "
+            "ON r.id=rr.relationship_id WHERE r.environment_id=%s AND r.external_id=%s "
+            "AND rr.recorded_to IS NULL AND rr.valid_to IS NULL",
+            (twin["env"], member),
+        ).fetchone()[0]
+    assert open_revisions == 1  # the re-granted membership is current again
