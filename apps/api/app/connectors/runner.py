@@ -1,6 +1,7 @@
 """Connector sync jobs (worker). Each page commits atomically with its sync-run progress, so a
 failure leaves a resumable cursor and never implies that unseen objects were deleted."""
 
+import logging
 import time
 from uuid import UUID, uuid4
 
@@ -10,6 +11,9 @@ from .base import ConnectorUnavailable, RateLimited
 from .providers import build
 
 MAX_RETRIES = 3
+
+
+log = logging.getLogger("identityguardian.connectors")
 
 
 def start_run(conn, connector, environment, actor_id, mode):
@@ -50,7 +54,26 @@ def run_job(db, org: UUID, connector_id: UUID, mode: str, actor_id=None, backoff
             "SELECT * FROM environments WHERE id=%s", (connector["environment_id"],)
         ).fetchone()
         run_id, cursor = start_run(conn, connector, environment, actor_id, mode)
-    impl = build(connector)
+    failed = lambda reason, totals=None, cursor=None, pages=0, retries=0: finish(  # noqa: E731
+        db,
+        org,
+        connector,
+        run_id,
+        "PARTIAL",
+        totals or dict(observed=0, unchanged=0, created=0, updated=0, tombstoned=0, rejected=0),
+        cursor,
+        pages,
+        retries,
+        [dict(object="(connector)", reason=reason)],
+        "FAILING",
+    )
+    try:
+        impl = build(connector)
+    except ConnectorUnavailable as exc:
+        return failed(str(exc))
+    except Exception:  # noqa: BLE001 - never leave a RUNNING run and a redelivery loop behind
+        log.exception("Connector %s could not be built", connector_id)
+        return failed("Connector could not be started; see the worker log")
     seen, totals, retries, pages = (
         set(),
         dict(observed=0, unchanged=0, created=0, updated=0, tombstoned=0, rejected=0),
@@ -83,7 +106,10 @@ def run_job(db, org: UUID, connector_id: UUID, mode: str, actor_id=None, backoff
                         "DEGRADED",
                     )
                 time.sleep(backoff * 2**attempt)  # bounded exponential backoff
-            except ConnectorUnavailable as exc:
+            except Exception as exc:  # noqa: BLE001 - outside the connector contract
+                if not isinstance(exc, ConnectorUnavailable):
+                    log.exception("Connector %s failed unexpectedly", connector_id)
+                    exc = ConnectorUnavailable("Connector failed unexpectedly; see the worker log")
                 return finish(
                     db,
                     org,

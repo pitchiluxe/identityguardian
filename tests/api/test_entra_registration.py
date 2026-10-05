@@ -123,3 +123,62 @@ def test_worker_sync_ingests_the_tenant_with_the_decrypted_secret(client, twin, 
     as_user(client, twin["people"], "viewer")
     names = {i["name"] for i in client.get(base + "/identities").json()["data"]}
     assert {"Ada Admin", "Gus Guest"} <= names
+
+
+def queue_and_run(client, twin, env, connector):
+    headers = as_user(client, twin["people"], "operator")
+    base = f"/api/v1/organizations/{twin['org']}/environments/{env}"
+    response = client.post(
+        base + f"/connectors/{connector['id']}/sync", headers=headers, json={"mode": "full"}
+    )
+    assert response.status_code == 202
+    worker = Database(os.environ["WORKER_DATABASE_URL"])
+    try:
+        process_one(worker, twin["org"])
+    finally:
+        worker.close()
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        run = conn.execute(
+            "SELECT status FROM sync_runs WHERE connector_id=%s ORDER BY started_at DESC LIMIT 1",
+            (connector["id"],),
+        ).fetchone()[0]
+        pending = conn.execute(
+            "SELECT count(*) FROM outbox WHERE organization_id=%s AND processed_at IS NULL",
+            (twin["org"],),
+        ).fetchone()[0]
+        health = conn.execute(
+            "SELECT health FROM connectors WHERE id=%s", (connector["id"],)
+        ).fetchone()[0]
+    return run, pending, health
+
+
+def test_worker_sync_works_with_production_worker_environment(client, twin, monkeypatch):
+    # The packaged worker sets DEVELOPMENT=false without the API's HTTPS settings; building the
+    # connector must not depend on the full API Settings validation.
+    env = sandbox_env(twin["org"])
+    connector = create(client, twin, env).json()["data"]
+    real = entra.EntraConnector
+    monkeypatch.setattr(
+        entra,
+        "EntraConnector",
+        lambda config, secret, http=None: real(
+            config, secret, http=httpx.Client(transport=httpx.MockTransport(FakeMicrosoft()))
+        ),
+    )
+    monkeypatch.setenv("SECRET_MASTER_KEY", client.app.state.settings.secret_master_key)
+    monkeypatch.setenv("DEVELOPMENT", "false")
+    monkeypatch.setenv("APP_ORIGIN", "http://worker.internal")
+    assert queue_and_run(client, twin, env, connector)[:2] == ("SUCCEEDED", 0)
+
+
+def test_unexpected_connector_error_finishes_the_run_instead_of_looping(client, twin, monkeypatch):
+    env = sandbox_env(twin["org"])
+    connector = create(client, twin, env).json()["data"]
+
+    class Broken:
+        def read(self, cursor):
+            raise KeyError("id")
+
+    monkeypatch.setattr(entra, "EntraConnector", lambda *a, **k: Broken())
+    monkeypatch.setenv("SECRET_MASTER_KEY", client.app.state.settings.secret_master_key)
+    assert queue_and_run(client, twin, env, connector) == ("PARTIAL", 0, "FAILING")

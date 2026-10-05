@@ -24,6 +24,22 @@ def secret(name):
     raise KeyError(f"{name} is not configured (environment or {name.lower()} secret file)")
 
 
+def master_keys():
+    """(current, previous) envelope keys for processes that are not the API (the worker): read
+    from the environment or mounted secret files without the API's HTTPS/cookie validation."""
+    import json
+
+    try:
+        current = secret("SECRET_MASTER_KEY")
+    except KeyError:
+        current = ""
+    try:
+        previous = json.loads(secret("SECRET_MASTER_KEY_PREVIOUS"))
+    except (KeyError, ValueError):
+        previous = []
+    return current, previous if isinstance(previous, list) else []
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", secrets_dir=_secrets_dir())
     database_url: str = ""

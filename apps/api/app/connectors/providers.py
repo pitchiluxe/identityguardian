@@ -219,17 +219,21 @@ PROVIDERS = {"mock_entra": MockEntra, "mock_okta": MockOkta}
 def build(connector_row, settings=None) -> Connector:
     kind = connector_row["kind"]
     if kind == "entra":
-        from ..config import Settings
+        from ..config import master_keys
         from ..secrets_envelope import open_envelope
         from . import entra
 
-        settings = settings or Settings()
+        current, previous = (
+            (settings.secret_master_key, settings.secret_master_key_previous)
+            if settings
+            else master_keys()
+        )
         try:
             secret = open_envelope(
                 connector_row["secret_envelope"],
-                settings.secret_master_key,
+                current,
                 f"connector:{connector_row['id']}",
-                settings.secret_master_key_previous,
+                previous,
             )
         except Exception:  # noqa: BLE001 - any failure to open is reported without detail
             raise ConnectorUnavailable(

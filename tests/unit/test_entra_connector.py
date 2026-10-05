@@ -163,3 +163,18 @@ def test_cursor_is_opaque_json_without_secret():
     assert page.next_cursor and SECRET not in page.next_cursor
     assert "tok" not in page.next_cursor  # the access token never enters a stored cursor
     json.dumps(page.provenance)
+
+
+def test_non_json_and_malformed_items_are_contained():
+    def proxy_page(request):
+        if request.url.host == "login.microsoftonline.com":
+            return httpx.Response(200, json={"access_token": "tok"})
+        return httpx.Response(200, text="<html>proxy</html>")
+
+    with pytest.raises(ConnectorUnavailable, match="Microsoft Graph unavailable"):
+        EntraConnector(
+            CONFIG, SECRET, http=httpx.Client(transport=httpx.MockTransport(proxy_page))
+        ).read(None)
+    bad = dict(TENANT_DATA, **{"/users": [{"displayName": "No id"}, TENANT_DATA["/users"][0]]})
+    page = connector(FakeMicrosoft(data=bad)).read(None)
+    assert {o["object_id"] for o in page.objects} >= {"entra:u1"}  # malformed item skipped

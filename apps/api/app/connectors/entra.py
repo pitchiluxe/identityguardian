@@ -89,7 +89,10 @@ class EntraConnector(Connector):
             raise RateLimited("Microsoft throttled the token request")
         if response.status_code >= 300:
             raise ConnectorUnavailable(UNAVAILABLE)
-        self._token = response.json().get("access_token")
+        try:
+            self._token = response.json().get("access_token")
+        except (ValueError, AttributeError):
+            raise ConnectorUnavailable(UNAVAILABLE) from None
         if not self._token:
             raise ConnectorUnavailable(UNAVAILABLE)
 
@@ -112,7 +115,13 @@ class EntraConnector(Connector):
                 raise RateLimited("Microsoft Graph throttled the request")
             if response.status_code >= 300:
                 raise ConnectorUnavailable(UNAVAILABLE)
-            return response.json()
+            try:
+                data = response.json()
+            except ValueError:
+                raise ConnectorUnavailable(UNAVAILABLE) from None  # e.g. a proxy HTML page
+            if not isinstance(data, dict):
+                raise ConnectorUnavailable(UNAVAILABLE)
+            return data
         raise ConnectorUnavailable(REJECTED)
 
     # -- staged read --------------------------------------------------------------------------
@@ -138,7 +147,8 @@ class EntraConnector(Connector):
             if stage in LISTS:
                 data = self._get(state["url"] or GRAPH + LISTS[stage])
                 for item in data.get("value", []):
-                    self._map_list(stage, item, state, emit, _node, _rel)
+                    if isinstance(item, dict) and item.get("id"):  # skip malformed items
+                        self._map_list(stage, item, state, emit, _node, _rel)
                 self._advance(state, data.get("@odata.nextLink"))
                 break
             queue_name, template = EXPAND[stage]
@@ -149,7 +159,8 @@ class EntraConnector(Connector):
                 state["current"] = state[queue_name].pop(0)
             data = self._get(state["url"] or GRAPH + template.format(state["current"]))
             for item in data.get("value", []):
-                self._map_member(stage, state["current"], item, state, emit, _rel)
+                if isinstance(item, dict) and (item.get("id") or item.get("principalId")):
+                    self._map_member(stage, state["current"], item, state, emit, _rel)
             nxt = data.get("@odata.nextLink")
             state["url"] = nxt
             if not nxt:
