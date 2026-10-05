@@ -9,7 +9,7 @@ from uuid import UUID, uuid4
 import psycopg
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
@@ -432,6 +432,12 @@ def create_app(settings=None, db=None):
 
     web = Path(__file__).resolve().parents[2] / "web" / "dist"
     if web.exists():
+
+        @app.get("/invite/{token}", include_in_schema=False)
+        def invite_page(token: str):
+            # Deep link into the single-page shell; static HTML only, no invite lookup here.
+            return FileResponse(web / "index.html")
+
         app.mount("/", StaticFiles(directory=web, html=True), name="web")
     return app
 

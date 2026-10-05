@@ -96,3 +96,14 @@ def test_unknown_subject_without_invite_still_refused(client, monkeypatch):
     )
     assert done.status_code == 403
     assert done.json()["detail"] == "This identity has not been provisioned for the platform"
+
+
+def test_invite_deep_link_serves_shell_without_invite_details(client, tenant):
+    org, _, people = tenant
+    token = create(client, org, people)["link"].split("/")[-1]
+    client.cookies.clear()
+    for path in (f"/invite/{token}", "/invite/invalid"):
+        response = client.get(path)
+        assert response.status_code == 200 and "<div id=" in response.text
+        assert "pat@example.org" not in response.text and str(org) not in response.text
+        assert response.headers["content-security-policy"].startswith("default-src 'self'")

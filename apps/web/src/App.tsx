@@ -46,6 +46,8 @@ export function App() {
   const navigate = (name: string, next: Record<string, string> = {}) => { setPage(name); setParams(next); setMenu(false); window.scrollTo?.(0, 0); };
   const signOut = async () => { try { await api('/auth/logout', 'POST', undefined, session?.csrf_token); setSession(null); setOverview(null); } catch (e) { setError((e as Error).message); } };
   if (loading) return <main className="loading"><ShieldCheck size={32}/><p>Opening your workspace…</p></main>;
+  const inviteToken = window.location.pathname.match(/^\/invite\/([^/]+)$/)?.[1];
+  if (!session && inviteToken) return <InviteLanding token={safeDecode(inviteToken)}/>;
   if (!session) return <Landing error={error}/>;
 
   const envCaps = envCapabilities.data?.data;
@@ -95,3 +97,16 @@ function Landing({ error }: { error: string }) {
       <div className="panel-foot"><Info size={15}/> Local development · synthetic organization</div>
     </section></main><footer>IdentityGuardian AI <span>Investigate. Explain. Approve.</span></footer></div>;
 }
+
+function InviteLanding({ token }: { token: string }) {
+  const invalid = token === 'invalid';
+  return <div className="entry"><header><Brand/><span className="pill">{BUILD_LABEL}</span></header><main className="entry-grid"><section className="entry-copy">
+    <h1>{invalid ? 'This invite cannot be used' : "You've been invited"}</h1>
+    <p className="entry-description">{invalid ? 'It may have expired, been used or been revoked. Ask your administrator for a new invite.' : 'Create your own account with a password and an authenticator app. Your access is set by the invite.'}</p>
+    {!invalid && <><a className="primary login" href={`/api/v1/auth/register?invite=${encodeURIComponent(token.trim())}`}>Create account <ArrowUpRight size={18}/></a>
+      <a className="secondary" href="/api/v1/auth/login">I already have an account</a></>}
+  </section></main></div>;
+}
+
+/** A mangled pasted link must show the generic invalid page, not crash the shell. */
+function safeDecode(value: string) { try { return decodeURIComponent(value).trim(); } catch { return 'invalid'; } }
