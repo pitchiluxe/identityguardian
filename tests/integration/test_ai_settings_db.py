@@ -40,10 +40,9 @@ def test_keys_are_bound_to_the_live_session():
         assert conn.execute("SELECT * FROM ai_key_meta(%s)", (alice,)).fetchall() == [
             ("anthropic", "a1b2")
         ]
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute(
-                "SELECT ai_key_get(%s,'anthropic')", (digest(alice),)
-            )  # hash is not a token
+        with pytest.raises(psycopg.errors.InsufficientPrivilege), conn.transaction():
+            # A session hash is not a token: reading token_hash from sessions does not unlock keys.
+            conn.execute("SELECT ai_key_get(%s,'anthropic')", (digest(alice),))
         assert conn.execute("SELECT ai_key_delete(%s,'anthropic')", (alice,)).fetchone()[0] is True
 
 
