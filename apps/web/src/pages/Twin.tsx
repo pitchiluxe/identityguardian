@@ -45,9 +45,13 @@ export function IdentityProfile(ctx: Ctx) {
 type Hood = { nodes: TwinNode[]; edges: TwinEdge[]; complete: boolean; truncation_reason: string | null; collapsed: { id: string; name: string; degree: number }[] };
 
 export function GraphExplorer(ctx: Ctx) {
-  const [focus, setFocus] = useState(ctx.params.node || 'idn-erick'); const [depth, setDepth] = useState(2);
+  // Default to an identity that exists in the selected environment, never a fixture-specific ID.
+  const first = useResource<Envelope<TwinNode[]>>(ctx.params.node ? null : `${ctx.base}/identities?limit=1`);
+  const [typed, setFocus] = useState(ctx.params.node || ''); const [depth, setDepth] = useState(2);
+  const focus = typed || first.data?.data[0]?.external_id || '';
   const [classes, setClasses] = useState<Record<string, boolean>>({ grant: true, deny: true, exposure: true, context: false, dependency: true });
-  const hood = useResource<Envelope<Hood>>(`${ctx.base}/graph/neighbors?node=${encodeURIComponent(focus)}&depth=${depth}&max_nodes=120`);
+  const hood = useResource<Envelope<Hood>>(focus ? `${ctx.base}/graph/neighbors?node=${encodeURIComponent(focus)}&depth=${depth}&max_nodes=120` : null);
+  if (!ctx.params.node && first.data && first.data.data.length === 0) return <p className="empty-text">No identities have been ingested for this environment. Choose another environment or run a sync from Integrations.</p>;
   return <><div className="toolbar"><label className="inline">Focus<input aria-label="Focus node external ID" className="mono" value={focus} onChange={e => setFocus(e.target.value.trim())}/></label>
     <label className="inline">Depth<select value={depth} onChange={e => setDepth(Number(e.target.value))}>{[1, 2, 3].map(d => <option key={d}>{d}</option>)}</select></label>
     <fieldset className="filters"><legend>Relationship classes</legend>{Object.keys(classes).map(c => <label key={c} className="check"><input type="checkbox" checked={classes[c]} onChange={e => setClasses({ ...classes, [c]: e.target.checked })}/>{label(c)}</label>)}</fieldset></div>

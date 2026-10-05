@@ -14,13 +14,15 @@ const iso = (local: string) => local ? new Date(local).toISOString() : '';
 
 export function TimeMachine(ctx: Ctx) {
   const people = useResource<Envelope<TwinNode[]>>(`${ctx.base}/identities?limit=100`);
-  const [who, setWho] = useState(ctx.params.node || 'idn-erick'); const [effective, setEffective] = useState('2026-05-01T12:00'); const [known, setKnown] = useState('');
+  // Default to an identity that exists in the selected environment, never a fixture-specific ID.
+  const [picked, setWho] = useState(ctx.params.node || ''); const who = picked || people.data?.data[0]?.external_id || ''; const [effective, setEffective] = useState('2026-05-01T12:00'); const [known, setKnown] = useState('');
   const q = new URLSearchParams({ effective_at: iso(effective), ...(known ? { known_at: iso(known) } : {}) });
   const result = useResource<Envelope<Reconstruction>>(who && effective ? `${ctx.base}/history/identities/${encodeURIComponent(who)}?${q}` : null);
   return <><div className="toolbar"><label className="inline">Identity<select aria-label="History identity" value={who} onChange={e => setWho(e.target.value)}>{(people.data?.data || []).map(p => <option key={p.id} value={p.external_id}>{p.name}</option>)}</select></label>
     <label className="inline">Effective at<input type="datetime-local" aria-label="History effective at" value={effective} onChange={e => setEffective(e.target.value)}/></label>
     <label className="inline">Known at<input type="datetime-local" aria-label="History known at" value={known} onChange={e => setKnown(e.target.value)}/></label>
     <small>Times entered in {zone}; stored and compared in UTC. Empty “known at” means current knowledge.</small></div>
+    {people.data && people.data.data.length === 0 && <p className="empty-text">No identities have been ingested for this environment. Choose another environment or run a sync from Integrations.</p>}
     <State {...result}>{d => { const r = d.data; return <>
       <Panel title={`${r.identity.name} at ${fmt(r.effective_at)}`} meta={`Knowledge as of ${fmt(r.known_at)} · ${r.timezone}`}>
         {r.coverage.notes.length > 0 && <div className="pad"><Warning><span>{r.coverage.notes.join(' ')}</span></Warning></div>}
