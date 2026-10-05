@@ -6,6 +6,7 @@ from . import (
     findings,
     history,
     investigations,
+    invites,
     labs,
     lifecycle,
     policies,
@@ -29,4 +30,5 @@ ROUTERS = [
     reports.router,
     connectors.webhooks,
     audit_chain.router,
+    invites.router,
 ]
