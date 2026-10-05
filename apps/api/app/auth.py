@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import logging
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -58,7 +59,34 @@ def membership(conn, user_id, capability=None):
     return row
 
 
+REFUSALS = {
+    "invalid": "This invite is no longer valid — ask your administrator for a new one",
+    "expired": "This invite is no longer valid — ask your administrator for a new one",
+    "not_approved": "This invite is no longer valid — ask your administrator for a new one",
+    "email_mismatch": "Sign in with the email address the invite was sent to",
+    "already_member": "You are already a member of this organization",
+}
+
+
 def begin_login(request: Request):
+    return _begin(request)
+
+
+def begin_registration(request: Request, invite: str = ""):
+    """Start IdP self-registration for an invite. Every unusable token gets the same response."""
+    token = invite.strip()
+    usable = False
+    if 20 <= len(token) <= 128:
+        with request.app.state.db.transaction() as conn:
+            usable = conn.execute("SELECT invite_usable(%s) AS ok", (digest(token),)).fetchone()[
+                "ok"
+            ]
+    if not usable:
+        return RedirectResponse("/invite/invalid", status_code=303)
+    return _begin(request, endpoint="registrations", invite_hash=digest(token))
+
+
+def _begin(request: Request, endpoint="auth", invite_hash=None):
     settings = request.app.state.settings
     browser, state, nonce, verifier = [secrets.token_urlsafe(32) for _ in range(4)]
     challenge = (
@@ -67,19 +95,21 @@ def begin_login(request: Request):
     with request.app.state.db.transaction() as conn:
         conn.execute("DELETE FROM login_attempts WHERE expires_at<now()")
         conn.execute(
-            "INSERT INTO login_attempts VALUES(%s,%s,%s,%s,%s)",
+            "INSERT INTO login_attempts(token_hash,state,nonce,verifier,expires_at,invite_hash) "
+            "VALUES(%s,%s,%s,%s,%s,%s)",
             (
                 digest(browser),
                 state,
                 nonce,
                 verifier,
                 datetime.now(timezone.utc) + timedelta(minutes=5),
+                invite_hash,
             ),
         )
     params = dict(
         client_id=settings.oidc_client_id,
         response_type="code",
-        scope="openid profile",
+        scope="openid profile email",
         redirect_uri=settings.app_origin + "/api/v1/auth/callback",
         state=state,
         nonce=nonce,
@@ -88,7 +118,7 @@ def begin_login(request: Request):
         max_age="0",
     )
     response = RedirectResponse(
-        settings.oidc_issuer_url + "/protocol/openid-connect/auth?" + urlencode(params)
+        f"{settings.oidc_issuer_url}/protocol/openid-connect/{endpoint}?" + urlencode(params)
     )
     response.set_cookie(
         "ig_login",
@@ -159,7 +189,25 @@ def complete_login(request: Request):
         user = conn.execute(
             "SELECT id FROM users WHERE issuer=%s AND subject=%s", (claims["iss"], claims["sub"])
         ).fetchone()
-        if not user:
+        if attempt.get("invite_hash"):
+            # Access comes only from the stored invite; token claims never choose the role.
+            redeemed = conn.execute(
+                "SELECT * FROM redeem_invite(%s,%s,%s,%s,%s)",
+                (
+                    attempt["invite_hash"],
+                    claims["iss"],
+                    claims["sub"],
+                    str(claims.get("name") or claims.get("preferred_username") or ""),
+                    str(claims.get("email") or ""),
+                ),
+            ).fetchone()
+            if redeemed["reason"]:
+                logging.getLogger("identityguardian").info(
+                    "Invite redemption refused: %s", redeemed["reason"]
+                )
+                raise HTTPException(403, REFUSALS[redeemed["reason"]])
+            user = {"id": redeemed["user_id"]}
+        elif not user:
             raise HTTPException(403, "This identity has not been provisioned for the platform")
         conn.execute(
             "DELETE FROM sessions WHERE token_hash=%s",

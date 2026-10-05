@@ -17,7 +17,14 @@ from starlette.concurrency import run_in_threadpool
 
 from . import logs
 from .ai.provider import OllamaProvider
-from .auth import authenticate, begin_login, complete_login, membership, require_session
+from .auth import (
+    authenticate,
+    begin_login,
+    begin_registration,
+    complete_login,
+    membership,
+    require_session,
+)
 from .config import Settings
 from .db import Database
 from .limits import within_quota
@@ -185,6 +192,7 @@ def create_app(settings=None, db=None):
 
     app.get("/api/v1/auth/login")(begin_login)
     app.get("/api/v1/auth/callback")(complete_login)
+    app.get("/api/v1/auth/register")(begin_registration)
 
     @app.get("/api/v1/session")
     def session(request: Request):
