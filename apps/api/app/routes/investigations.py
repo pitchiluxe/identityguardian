@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..ai import intents
 from ..ai.planner import CAPABILITY, plan
 from ..ai.provider import ProviderUnavailable
+from ..ai.registry import provider_for
 from ..ai.validate import SCHEMA, prompt, validate
 from ..auth import require_session
 from ..jsonutil import dumps
@@ -74,8 +75,9 @@ def summary(bundle):
 
 @router.post(ENV + "/investigations/query")
 def investigate(org: UUID, env: UUID, body: Question, request: Request):
-    settings, provider = request.app.state.settings, request.app.state.llm
+    settings = request.app.state.settings
     with scoped(request, org, env, "investigation:run") as scope:
+        provider, unavailable = provider_for(request, scope)
         ai_quota(scope, settings)
         snap = snapshot_for(scope)
         names, identities, targets = catalog(snap)
@@ -112,7 +114,7 @@ def investigate(org: UUID, env: UUID, body: Question, request: Request):
         elif not body.use_model:
             reason = "Model explanation not requested"
         elif provider is None:
-            status, reason = "AI_UNAVAILABLE", request.app.state.llm_error or "AI disabled"
+            status, reason = "AI_UNAVAILABLE", unavailable or "AI disabled"
         else:
             try:
                 output, latency = provider.complete(prompt(body.question, bundle), SCHEMA)

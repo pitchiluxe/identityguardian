@@ -1,5 +1,6 @@
 from . import (
     access,
+    ai_settings,
     audit_chain,
     changes,
     connectors,
@@ -31,4 +32,5 @@ ROUTERS = [
     connectors.webhooks,
     audit_chain.router,
     invites.router,
+    ai_settings.router,
 ]

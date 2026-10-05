@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from ..ai.provider import ProviderUnavailable
+from ..ai.registry import provider_for
 from ..ai.validate import SCHEMA, validate
 from ..auth import require_session
 from ..domain.graph import load
@@ -282,8 +283,8 @@ def solution(org: UUID, attempt_id: UUID, request: Request, confirm: bool = Fals
 @router.post("/labs/attempts/{attempt_id}/explain")
 def explain(org: UUID, attempt_id: UUID, request: Request):
     """Instructor: explains validator findings. It cannot change configuration or award scores."""
-    provider = request.app.state.llm
     with scoped(request, org, None, "lab:attempt") as scope:
+        provider, _ = provider_for(request, scope)
         attempt = attempt_for(scope, attempt_id)
         lab, result, scored, _ = grade(scope, attempt)
         facts = [

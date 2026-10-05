@@ -96,6 +96,7 @@ def test_route_inventory_is_complete():
             (
                 "/api/v1/session",
                 "/api/v1/auth/",
+                "/api/v1/ai/keys/",  # self-service: only the caller's own key, bound to their session
                 "/api/v1/organizations/{org}/role-requests",
                 "/api/v1/organizations/{org}/overview",
                 "/api/v1/organizations/{org}/members",

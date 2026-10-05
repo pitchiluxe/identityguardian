@@ -30,6 +30,7 @@ ROLE_CAPABILITIES = {
         "report:create",
         "report:read",
         "lab:manage",
+        "ai:configure",
     },
     "auditor": _ANALYSIS | {"audit:read", "report:read", "report:create"},
     "learner": {"overview:read", "lab:attempt"},
