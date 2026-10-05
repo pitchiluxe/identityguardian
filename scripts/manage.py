@@ -102,6 +102,42 @@ def rotate_master_key(conn, settings, organization=None):
 SYSTEM_INVITER = UUID("00000000-0000-4000-8000-00000000b007")
 
 
+def rotate_ai_keys(conn, settings, user=None):
+    """Re-wrap users' AI provider keys (Phase 24) under SECRET_MASTER_KEY. Same contract as
+    rotate_master_key: idempotent, never prints keys, and reports envelopes it cannot open."""
+    from cryptography.exceptions import InvalidTag
+
+    from apps.api.app.ai.registry import key_context
+    from apps.api.app.secrets_envelope import rewrap
+
+    counts = dict(rewrapped=0, current=0, unavailable=0)
+    rows = conn.execute(
+        "SELECT user_id, provider, envelope FROM user_ai_keys "
+        "WHERE (%s::uuid IS NULL OR user_id=%s)",
+        (user, user),
+    ).fetchall()
+    for user_id, provider, envelope in rows:
+        try:
+            updated = rewrap(
+                envelope,
+                settings.secret_master_key,
+                key_context(user_id, provider),
+                settings.secret_master_key_previous,
+            )
+        except (ValueError, InvalidTag):
+            counts["unavailable"] += 1
+            continue
+        if updated is None:
+            counts["current"] += 1
+            continue
+        conn.execute(
+            "UPDATE user_ai_keys SET envelope=%s WHERE user_id=%s AND provider=%s",
+            (Jsonb(updated), user_id, provider),
+        )
+        counts["rewrapped"] += 1
+    return counts
+
+
 def init_organization(conn, name, admin_email, approver_email, allow_additional=False):
     """Create a real organization, its PRODUCTION environment and two one-time bootstrap invites:
     the first org_admin and an independent approver. Without the approver, privileged invites,
@@ -224,8 +260,9 @@ def main():
             from apps.api.app.config import Settings
 
             counts = rotate_master_key(conn, Settings(), args.organization)
-            print(json.dumps(counts))
-            raise SystemExit(1 if counts["unavailable"] else 0)
+            ai = rotate_ai_keys(conn, Settings()) if args.organization is None else None
+            print(json.dumps(dict(connectors=counts, ai_keys=ai)))
+            raise SystemExit(1 if counts["unavailable"] or (ai and ai["unavailable"]) else 0)
         if args.command == "analyze":
             # Refresh planner statistics after bulk loads; stale statistics produce bad plans.
             conn.execute("ANALYZE")

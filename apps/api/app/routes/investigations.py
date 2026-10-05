@@ -119,7 +119,7 @@ def investigate(org: UUID, env: UUID, body: Question, request: Request):
             try:
                 output, latency = provider.complete(prompt(body.question, bundle), SCHEMA)
                 record.update(
-                    model=f"{provider.name}:{provider.model}",
+                    model=f"{provider.name}:{getattr(provider, 'answered_by', None) or provider.model}",
                     model_version=provider.version(),
                     latency_ms=latency,
                 )

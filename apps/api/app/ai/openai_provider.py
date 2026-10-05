@@ -16,6 +16,7 @@ class OpenAIProvider:
         if not model or not model.strip():
             raise ValueError("An OpenAI model ID is required")
         self.model = model.strip()
+        self.answered_by = self.model
         self._client = client or openai.OpenAI(api_key=api_key, max_retries=1, timeout=90.0)
 
     def version(self):
@@ -38,8 +39,10 @@ class OpenAIProvider:
             raise ProviderUnavailable("Model not found") from None
         except openai.RateLimitError:
             raise ProviderUnavailable("Rate limited by the provider") from None
-        except (openai.APIStatusError, openai.APIConnectionError):
+        except (openai.APIStatusError, openai.APIConnectionError, openai.OpenAIError):
             raise ProviderUnavailable("Provider unavailable") from None
+        if not getattr(response, "choices", None):
+            raise ProviderUnavailable("Provider unavailable")
         message = response.choices[0].message
         if getattr(message, "refusal", None):
             raise ProviderUnavailable("The model declined this request")

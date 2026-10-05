@@ -19,6 +19,7 @@ class AnthropicProvider:
 
     def __init__(self, api_key: str, model: str = DEFAULT_MODEL, client=None):
         self.model = model or DEFAULT_MODEL
+        self.answered_by = None  # the model that produced the last answer (fallback-aware)
         self._client = client or anthropic.Anthropic(api_key=api_key, max_retries=1, timeout=90.0)
 
     def version(self):
@@ -49,11 +50,18 @@ class AnthropicProvider:
             raise ProviderUnavailable("Model not found") from None
         except anthropic.RateLimitError:
             raise ProviderUnavailable("Rate limited by the provider") from None
-        except (anthropic.APIStatusError, anthropic.APIConnectionError):
+        except (anthropic.APIStatusError, anthropic.APIConnectionError, anthropic.APIError):
             raise ProviderUnavailable("Provider unavailable") from None
         if response.stop_reason == "refusal":
             raise ProviderUnavailable("The model declined this request")
-        text = next((b.text for b in response.content if b.type == "text"), "")
+        # On a server-side fallback, content is [partial text, fallback, fallback text]: only the
+        # text after the last fallback block is the answer, and that model answered it.
+        blocks, answered = list(response.content), getattr(response, "model", None) or self.model
+        for index, block in enumerate(blocks):
+            if block.type == "fallback":
+                blocks, answered = blocks[index + 1 :], block.to.model
+        self.answered_by = answered
+        text = next((b.text for b in blocks if b.type == "text"), "")
         try:
             parsed = json.loads(text)
         except json.JSONDecodeError:

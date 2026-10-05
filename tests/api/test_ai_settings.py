@@ -123,10 +123,52 @@ def test_hosted_answer_records_provider_and_switch_off_stops_egress(client, twin
     assert first.status_code == 200, first.text
     assert first.json()["data"]["model"] == "anthropic:claude-opus-5-5" and built == [CANARY]
     calls = len(fake.calls)
+    ollama = Fake(lambda m: {"insufficient_evidence": True, "claims": []})
+    client.app.state.llm = ollama
     put(client, twin, "admin", "/policy", {"allow_hosted_ai": False})
     second = ask(client, twin, "Who can access payroll?").json()["data"]
-    assert second["status"] == "AI_UNAVAILABLE" and len(fake.calls) == calls
-    assert "disabled for this organization" in second["note"]
+    assert len(fake.calls) == calls  # no hosted egress after the switch-off
+    assert len(ollama.calls) == 1 and second["model"] == "fake:fake-model"
+
+
+def test_operator_ai_kill_switch_blocks_every_provider(client, twin, monkeypatch):
+    monkeypatch.setattr(registry, "AnthropicProvider", lambda *a, **k: pytest.fail("no egress"))
+    monkeypatch.setattr(registry, "OllamaProvider", lambda *a, **k: pytest.fail("no ollama"))
+    enable_claude(client, twin)
+    client.app.state.settings.ai_enabled = False
+    data = ask(client, twin, "Who can access payroll?").json()["data"]
+    assert data["status"] == "AI_UNAVAILABLE" and "AI disabled" in data["note"]
+    put(
+        client,
+        twin,
+        "investigator",
+        "/settings",
+        {"provider": "ollama", "ollama_model": "other:7b"},
+    )
+    assert ask(client, twin, "Who can access payroll?").json()["data"]["status"] == "AI_UNAVAILABLE"
+
+
+def test_recorded_model_is_the_one_that_answered(client, twin, monkeypatch):
+    fake = Fake(
+        lambda m: {
+            "insufficient_evidence": False,
+            "claims": [
+                {"text": "Payroll access exists.", "type": "fact", "citations": fact_ids(m)[:1]}
+            ],
+        }
+    )
+    fake.name, fake.model, fake.answered_by = "anthropic", "claude-opus-5-5", "claude-opus-4-8"
+    monkeypatch.setattr(registry, "AnthropicProvider", lambda *a, **k: fake)
+    enable_claude(client, twin)
+    data = ask(client, twin, "Who can access payroll?").json()["data"]
+    assert data["model"] == "anthropic:claude-opus-4-8"
+
+
+def test_connection_test_uses_the_ai_quota(client, twin):
+    client.app.state.settings.ai_limit_per_minute = 1
+    client.app.state.llm = Fake(lambda m: {"ok": True})
+    assert post(client, twin, "viewer", "/test").status_code == 200
+    assert post(client, twin, "viewer", "/test").status_code == 429
 
 
 def test_hosted_needs_acknowledgement_and_a_key(client, twin, monkeypatch):

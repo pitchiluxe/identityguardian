@@ -32,8 +32,12 @@ def provider_for(request, scope):
     """Returns (provider, None) or (None, reason). The reason is safe to show to the user."""
     app = request.app
     settings = app.state.settings
+    if not settings.ai_enabled:  # operator kill switch: no provider of any kind
+        return None, "AI disabled"
     choice = user_choice(scope.conn, scope.user_id)
     provider = choice["provider"] if choice else "ollama"
+    if provider in HOSTED and not org_policy(scope.conn):
+        provider = "ollama"  # hosted disabled by the organization: answer locally instead
     if provider == "ollama":
         model = choice and choice["ollama_model"]
         if model and model != settings.ollama_model:
@@ -50,8 +54,6 @@ def provider_for(request, scope):
             except ValueError as exc:
                 return None, str(exc)
         return app.state.llm, app.state.llm_error or (None if app.state.llm else "AI disabled")
-    if not org_policy(scope.conn):
-        return None, "Hosted AI providers are disabled for this organization"
     if not choice["hosted_ack_at"]:
         return None, "Confirm that evidence may be sent to the provider in Settings"
     envelope = scope.conn.execute(

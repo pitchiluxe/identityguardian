@@ -13,6 +13,7 @@ from ..ai.registry import HOSTED, key_context, org_policy, provider_for, user_ch
 from ..auth import authenticate, require_session
 from ..scope import envelope, scoped
 from ..secrets_envelope import seal
+from .investigations import ai_quota
 
 router = APIRouter(dependencies=[Depends(require_session)])
 ORG = "/api/v1/organizations/{org}/ai"
@@ -160,15 +161,19 @@ def acknowledge(org: UUID, request: Request):
 
 @router.post(ORG + "/test")
 def test_connection(org: UUID, request: Request):
+    settings = request.app.state.settings
     with scoped(request, org, None, "overview:read") as scope:
+        ai_quota(scope, settings)  # same per-user AI limit as investigations
         provider, reason = provider_for(request, scope)
-        if provider is None:
-            return envelope(scope, dict(ok=False, reason=reason))
-        try:
-            provider.complete(TEST_PROMPT, TEST_SCHEMA)  # fixed prompt; no tenant evidence
-        except ProviderUnavailable as exc:
-            return envelope(scope, dict(ok=False, reason=str(exc)))
-        return envelope(scope, dict(ok=True, provider=provider.name, model=provider.model))
+    # The model call runs after the transaction so a slow provider never holds a DB connection.
+    if provider is None:
+        return {"data": dict(ok=False, reason=reason)}
+    try:
+        provider.complete(TEST_PROMPT, TEST_SCHEMA)  # fixed prompt; no tenant evidence
+    except ProviderUnavailable as exc:
+        return {"data": dict(ok=False, reason=str(exc))}
+    model = getattr(provider, "answered_by", None) or provider.model
+    return {"data": dict(ok=True, provider=provider.name, model=model)}
 
 
 def audit_everywhere(request, user, action, provider):

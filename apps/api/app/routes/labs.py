@@ -351,7 +351,7 @@ def explain(org: UUID, attempt_id: UUID, request: Request):
         return envelope(
             scope,
             dict(
-                source=f"{provider.name}:{provider.model}",
+                source=f"{provider.name}:{getattr(provider, 'answered_by', None) or provider.model}",
                 claims=accepted,
                 rejected=rejected,
                 latency_ms=latency,
