@@ -9,3 +9,7 @@ Ingestion stages observations → validates IDs/types/scope → computes diff �
 Sandbox adapters simulate memberships, roles, tickets, contextual policies and JIT expiry. SAML/OIDC/SCIM/MFA labs are protocol simulations, not actual federation or authentication protection.
 
 Real adapters require least-privilege scopes, encrypted secret references, endpoint allowlists, bounded retries, source rate limits, signed webhook checks where supported and independent security review. Read-only pilots precede writes. Phase 0 approval does not activate production connectivity.
+
+## Microsoft Entra ID (read-only, Phase 23)
+
+Implemented. The kind is `entra`, using Microsoft Graph v1.0 with client credentials. It reads users, groups, direct group members (including nested groups), activated directory roles and their members, and enterprise apps (up to 200) with their user assignments. Group-to-app assignments are counted but not represented. It needs these Microsoft Graph **application** permissions with admin consent: `User.Read.All`, `Group.Read.All`, `Directory.Read.All`, `Application.Read.All` and `RoleManagement.Read.Directory`. It never writes. Okta (real) is planned as a separate phase.

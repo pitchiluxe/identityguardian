@@ -239,6 +239,25 @@ Members ask for role changes by emailing **[erickomari243@gmail.com](mailto:eric
 
 ---
 
+## 7b. Connect your Microsoft Entra ID test tenant (read-only)
+
+IdentityGuardian can read a real Entra ID tenant. It **never changes anything in it**. For a demo, use your own free test tenant filled with made-up users.
+
+**In Azure (about 15 minutes):**
+1. Create a free Azure account at <https://azure.microsoft.com/free>. It includes an Entra ID tenant.
+2. Go to **Microsoft Entra ID → App registrations → New registration**, name it `IdentityGuardian (read-only)` and click **Register**.
+3. Copy the **Application (client) ID** and the **Directory (tenant) ID**.
+4. Go to **API permissions → Add a permission → Microsoft Graph → Application permissions**. Add `User.Read.All`, `Group.Read.All`, `Directory.Read.All`, `Application.Read.All` and `RoleManagement.Read.Directory`, then click **Grant admin consent**.
+5. Go to **Certificates & secrets → New client secret** and copy the **Value** immediately (it is shown once).
+6. Optionally, create a few fake users and groups and give one user an admin role, so there is something to analyse.
+
+**In IdentityGuardian:**
+1. **Administration → Create a sandbox environment** (for example "Entra demo"), then select it in the top bar. Entra can't be connected to lab environments.
+2. **Integrations → Connect Microsoft Entra ID (read-only)**. Paste the Tenant ID, Client ID and Client secret, then click **Connect tenant**. The secret is encrypted and never shown again.
+3. Click **Sync now**. When the run finishes, Identities, Access, Identity graph, Privilege radar and Attack paths show your tenant.
+
+> ⚠️ Never send the client secret by email or chat — paste it only into the app. If it leaks, delete it in Azure (**Certificates & secrets**) and create a new one.
+
 ## 7a. AI providers (Settings → AI)
 
 The investigator and the lab instructor can use one of three AI providers. All of them only **explain** evidence you are allowed to see. They cannot change access, and their claims are checked against the evidence.
