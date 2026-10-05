@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..auth import require_session
 from ..domain import graph
 from ..domain.ingest import run_sync, seed_sandbox
-from ..scope import envelope, scoped
+from ..scope import development_only, envelope, scoped
 
 router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 ENV = "/environments/{env}"
@@ -62,7 +62,7 @@ def environments(org: UUID, request: Request):
         return envelope(scope, rows)
 
 
-@router.post(ENV + "/sandbox/seed")
+@router.post(ENV + "/sandbox/seed", dependencies=[Depends(development_only)])
 def seed(org: UUID, env: UUID, body: SeedRequest, request: Request):
     with scoped(request, org, env, "sandbox:seed") as scope:
         try:
@@ -80,7 +80,7 @@ def seed(org: UUID, env: UUID, body: SeedRequest, request: Request):
         )
 
 
-@router.post(ENV + "/connectors/sandbox/sync")
+@router.post(ENV + "/connectors/sandbox/sync", dependencies=[Depends(development_only)])
 def sync(org: UUID, env: UUID, body: SyncRequest, request: Request):
     with scoped(request, org, env, "connector:sync") as scope:
         scope.conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", ("sync:" + str(env),))

@@ -75,6 +75,12 @@ LAB_CAPABILITIES = {
 }
 
 
+def development_only(request: Request):
+    """Synthetic fixtures, sandbox tooling and mock providers do not exist in production."""
+    if not request.app.state.settings.development:
+        raise HTTPException(404, "Not Found")
+
+
 @contextmanager
 def scoped(request: Request, org: UUID, env: UUID | None, capability: str):
     user = authenticate(request)

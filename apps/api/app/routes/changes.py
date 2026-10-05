@@ -16,7 +16,7 @@ from ..domain.simulate import APPROVAL_TTL, simulate
 from ..domain.types import validate
 from ..jsonutil import dumps
 from ..jsonutil import jsonb as Jsonb
-from ..scope import envelope, scoped
+from ..scope import development_only, envelope, scoped
 from ..security import digest, require_recent_mfa
 from .twin import ENV, snapshot_for
 
@@ -583,7 +583,7 @@ def jit_grants(org: UUID, env: UUID, request: Request):
         )
 
 
-@router.put(ENV + "/sandbox/faults")
+@router.put(ENV + "/sandbox/faults", dependencies=[Depends(development_only)])
 def set_fault(org: UUID, env: UUID, body: FaultRequest, request: Request):
     with scoped(request, org, env, "sandbox:seed") as scope:
         if scope.environment["kind"] not in {"LAB", "SANDBOX"}:

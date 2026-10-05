@@ -15,7 +15,7 @@ from ..auth import require_session
 from ..connectors.base import validate_endpoint
 from ..connectors.providers import build
 from ..jsonutil import jsonb as Jsonb
-from ..scope import envelope, scoped
+from ..scope import development_only, envelope, scoped
 from ..secrets_envelope import open_envelope, seal
 from .twin import ENV
 
@@ -90,6 +90,8 @@ def connectors(org: UUID, env: UUID, request: Request):
 def create(org: UUID, env: UUID, body: ConnectorRequest, request: Request):
     settings = request.app.state.settings
     with scoped(request, org, env, "connector:manage") as scope:
+        if not settings.development:
+            raise HTTPException(422, "Connector kind not available in production")
         if scope.environment["kind"] not in {"LAB", "SANDBOX"}:
             raise HTTPException(
                 409,
@@ -140,7 +142,7 @@ def create(org: UUID, env: UUID, body: ConnectorRequest, request: Request):
         return envelope(scope, public(row))
 
 
-@router.put(ENV + "/connectors/{connector_id}/faults")
+@router.put(ENV + "/connectors/{connector_id}/faults", dependencies=[Depends(development_only)])
 def faults(org: UUID, env: UUID, connector_id: UUID, body: FaultConfig, request: Request):
     with scoped(request, org, env, "connector:manage") as scope:
         if scope.environment["kind"] not in {"LAB", "SANDBOX"}:
