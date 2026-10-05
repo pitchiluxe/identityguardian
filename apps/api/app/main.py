@@ -103,7 +103,9 @@ def create_app(settings=None, db=None):
     app.state.settings = settings or Settings()
     logs.configure(app.state.settings.log_format)
     owns_db = db is None
-    app.state.db = db or Database(app.state.settings.database_url)
+    # Two warm connections: opening a PostgreSQL backend on Windows can exceed the connect timeout
+    # under load, which would turn the first request after an idle minute into a 503.
+    app.state.db = db or Database(app.state.settings.database_url, min_size=2)
     app.state.llm, app.state.llm_error = None, None
     if app.state.settings.ai_enabled:
         try:

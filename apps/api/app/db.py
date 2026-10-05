@@ -16,8 +16,9 @@ class Database:
     """Pooled connections. Each `transaction()` is one database transaction whose tenant scope
     (`app.org`) is set with `set_config(..., true)` and therefore ends with the transaction."""
 
-    def __init__(self, url, max_size=8):
+    def __init__(self, url, max_size=8, min_size=0):
         self.url, self.max_size = url, max_size
+        self.min_size = min(min_size, max_size)
         self._pool = None
         self._lock = threading.Lock()
 
@@ -28,7 +29,7 @@ class Database:
                 if self._pool is None:
                     self._pool = ConnectionPool(
                         self.url,
-                        min_size=0,
+                        min_size=self.min_size,
                         max_size=self.max_size,
                         max_idle=60,
                         timeout=15,
