@@ -35,7 +35,9 @@ def main():
     realm = dict(
         realm="identityguardian",
         enabled=True,
-        registrationAllowed=False,
+        # Invitees register their own credentials; platform access still requires an invite.
+        registrationAllowed=True,
+        passwordPolicy="length(12) and notUsername",
         sslRequired="none",
         clients=[
             dict(

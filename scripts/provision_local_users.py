@@ -103,6 +103,19 @@ def configure_amr(client, headers):
             ).raise_for_status()
 
 
+def configure_registration(client, headers):
+    """Self-registration for invitees: own password (policy) and mandatory TOTP enrolment.
+    Access is still granted only by an invite in the platform."""
+    admin = f"{KEYCLOAK}/admin/realms/{REALM}"
+    realm = client.get(admin, headers=headers).json()
+    realm.update(registrationAllowed=True, passwordPolicy="length(12) and notUsername")
+    client.put(admin, headers=headers, json=realm).raise_for_status()
+    url = f"{admin}/authentication/required-actions/CONFIGURE_TOTP"
+    action = client.get(url, headers=headers).json()
+    action.update(enabled=True, defaultAction=True)
+    client.put(url, headers=headers, json=action).raise_for_status()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mfa", action="append", default=[], help="enrol TOTP for this username")
@@ -114,6 +127,7 @@ def main():
     with httpx.Client(timeout=15) as client:
         headers = {"Authorization": "Bearer " + admin_token(client)}
         configure_amr(client, headers)
+        configure_registration(client, headers)
         added = []
         for name, roles in EXTRA:
             if name in known:
