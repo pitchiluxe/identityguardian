@@ -16,6 +16,21 @@ from ..security import digest
 from .types import ORIGINS, validate
 
 SOURCE = "sandbox"
+NODE_KINDS = {
+    "identity",
+    "account",
+    "group",
+    "role",
+    "permission",
+    "resource",
+    "application",
+    "device",
+    "department",
+    "tool",
+    "provider",
+    "credential",
+}
+PREFETCH_THRESHOLD = 200
 ORDER = {"node": 0, "relationship": 1, "employment_event": 2, "coverage": 3, "usage": 4}
 CAPABILITIES = {
     "read": ["node", "relationship", "usage", "coverage", "employment_event"],
@@ -139,6 +154,9 @@ def ensure_connector(conn, environment):
 
 
 class Ingestor:
+    """Applies source rows. Every check runs before any write, so a rejected object leaves no
+    partial state. `prefetch()` loads existing state in bulk for large batches."""
+
     def __init__(self, conn, environment, run_id, source=SOURCE):
         self.source = source
         self.conn, self.env, self.run_id = conn, environment, run_id
@@ -146,40 +164,124 @@ class Ingestor:
         self.counts = dict(observed=0, unchanged=0, created=0, updated=0, tombstoned=0, rejected=0)
         self.errors = []
         self.node_cache = {}
+        self.prefetched = False
+        self.latest, self.rels, self.rel_current, self.node_current = {}, {}, {}, {}
+
+    def prefetch(self):
+        args = (self.org, self.env_id, self.source)
+        for r in self.conn.execute(
+            "SELECT external_id, id, kind, subtype FROM twin_nodes WHERE organization_id=%s "
+            "AND environment_id=%s AND source=%s",
+            args,
+        ):
+            self.node_cache[r["external_id"]] = dict(
+                id=r["id"], kind=r["kind"], subtype=r["subtype"]
+            )
+        for r in self.conn.execute(
+            "SELECT DISTINCT ON (external_id) external_id, digest FROM observations "
+            "WHERE organization_id=%s AND environment_id=%s AND source=%s "
+            "ORDER BY external_id, received_at DESC",
+            args,
+        ):
+            self.latest[r["external_id"]] = r["digest"]
+        for r in self.conn.execute(
+            "SELECT external_id, id, type, from_node, to_node FROM relationships "
+            "WHERE organization_id=%s AND environment_id=%s AND source=%s",
+            args,
+        ):
+            self.rels[r["external_id"]] = r
+        for r in self.conn.execute(
+            "SELECT rr.relationship_id, rr.valid_from, rr.valid_to, rr.attributes "
+            "FROM relationship_revisions rr JOIN relationships r ON r.id=rr.relationship_id "
+            "WHERE r.organization_id=%s AND r.environment_id=%s AND r.source=%s "
+            "AND rr.recorded_to IS NULL",
+            args,
+        ):
+            self.rel_current.setdefault(r["relationship_id"], []).append(
+                (r["valid_from"], r["valid_to"], r["attributes"])
+            )
+        for r in self.conn.execute(
+            "SELECT nr.node_id, nr.valid_from, nr.valid_to, nr.status, nr.attributes, nr.name "
+            "FROM node_revisions nr JOIN twin_nodes n ON n.id=nr.node_id "
+            "WHERE n.organization_id=%s AND n.environment_id=%s AND n.source=%s "
+            "AND nr.recorded_to IS NULL ORDER BY nr.valid_from",
+            args,
+        ):
+            self.node_current.setdefault(r["node_id"], []).append(
+                (r["valid_from"], r["valid_to"], r["status"], r["attributes"], r["name"])
+            )
+        self.prefetched = True
+        return self
 
     def node(self, external_id):
-        if external_id not in self.node_cache:
+        if external_id not in self.node_cache and not self.prefetched:
             self.node_cache[external_id] = self.conn.execute(
                 "SELECT id, kind, subtype FROM twin_nodes WHERE environment_id=%s AND source=%s "
                 "AND external_id=%s",
                 (self.env_id, self.source, external_id),
             ).fetchone()
-        return self.node_cache[external_id]
+        return self.node_cache.get(external_id)
+
+    def _latest_digest(self, external_id):
+        if self.prefetched:
+            return self.latest.get(external_id)
+        row = self.conn.execute(
+            "SELECT digest FROM observations WHERE organization_id=%s AND environment_id=%s "
+            "AND source=%s AND external_id=%s ORDER BY received_at DESC LIMIT 1",
+            (self.org, self.env_id, self.source, external_id),
+        ).fetchone()
+        return row["digest"] if row else None
+
+    def _relationship(self, external_id):
+        if self.prefetched:
+            return self.rels.get(external_id)
+        return self.conn.execute(
+            "SELECT id, type, from_node, to_node FROM relationships WHERE environment_id=%s "
+            "AND source=%s AND external_id=%s",
+            (self.env_id, self.source, external_id),
+        ).fetchone()
+
+    def _rel_revisions(self, rel_id):
+        if self.prefetched:
+            return self.rel_current.get(rel_id, [])
+        rows = self.conn.execute(
+            "SELECT valid_from, valid_to, attributes FROM relationship_revisions "
+            "WHERE relationship_id=%s AND recorded_to IS NULL",
+            (rel_id,),
+        ).fetchall()
+        return [(r["valid_from"], r["valid_to"], r["attributes"]) for r in rows]
+
+    def _node_revisions(self, node_id):
+        if self.prefetched:
+            return self.node_current.get(node_id, [])
+        rows = self.conn.execute(
+            "SELECT valid_from, valid_to, status, attributes, name FROM node_revisions "
+            "WHERE node_id=%s AND recorded_to IS NULL ORDER BY valid_from",
+            (node_id,),
+        ).fetchall()
+        return [
+            (r["valid_from"], r["valid_to"], r["status"], r["attributes"], r["name"]) for r in rows
+        ]
 
     def observe(self, row):
         payload, removed = sanitize(dict(row["body"], deleted=row["deleted"]))
         if removed:
             payload["_redacted_fields"] = sorted(removed)
         fingerprint = digest(canonical(payload))
-        # Compare with the latest observation only: an object may return to an earlier state.
-        latest = self.conn.execute(
-            "SELECT digest FROM observations WHERE organization_id=%s AND environment_id=%s "
-            "AND source=%s AND external_id=%s ORDER BY received_at DESC LIMIT 1",
-            (self.org, self.env_id, self.source, row["object_id"]),
-        ).fetchone()
         self.counts["observed"] += 1
-        if latest and latest["digest"] == fingerprint:
+        # Compare with the latest observation only: an object may return to an earlier state.
+        if self._latest_digest(row["object_id"]) == fingerprint:
             self.counts["unchanged"] += 1
             return None
         return payload, fingerprint
 
     def record(self, row, payload, fingerprint):
-        return self.conn.execute(
+        observation = uuid4()
+        self.conn.execute(
             "INSERT INTO observations(id,organization_id,environment_id,source,sync_run_id,object_type,"
-            "external_id,source_version,payload,digest) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
-            "RETURNING id",
+            "external_id,source_version,payload,digest) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
             (
-                uuid4(),
+                observation,
                 self.org,
                 self.env_id,
                 self.source,
@@ -190,7 +292,9 @@ class Ingestor:
                 Jsonb(payload),
                 fingerprint,
             ),
-        ).fetchone()["id"]
+        )
+        self.latest[row["object_id"]] = fingerprint
+        return observation
 
     def reject(self, row, reason):
         self.counts["rejected"] += 1
@@ -202,61 +306,20 @@ class Ingestor:
             return
         payload, fingerprint = seen
         try:
-            handler = getattr(self, "apply_" + row["object_type"])
-            self.conn.execute("SAVEPOINT obj")
-            handler(row, payload, fingerprint)
-            self.conn.execute("RELEASE SAVEPOINT obj")
-        except (ValueError, KeyError, TypeError) as exc:
-            self.conn.execute("ROLLBACK TO SAVEPOINT obj")
+            getattr(self, "apply_" + row["object_type"])(row, payload, fingerprint)
+        except (ValueError, KeyError, TypeError) as exc:  # always raised before any write
             self.reject(row, str(exc))
 
     def apply_node(self, row, payload, fingerprint):
-        if payload["kind"] not in {
-            "identity",
-            "account",
-            "group",
-            "role",
-            "permission",
-            "resource",
-            "application",
-            "device",
-            "department",
-            "tool",
-            "provider",
-            "credential",
-        }:
+        if payload["kind"] not in NODE_KINDS:
             raise ValueError("Unknown node kind")
         revisions = sorted(payload["revisions"], key=lambda r: r["valid_from"])
         if not revisions:
             raise ValueError("Node without revisions")
-        observation = self.record(row, payload, fingerprint)
+        name = payload["name"]
         node = self.node(row["object_id"])
-        if not node:
-            node_id = uuid4()
-            self.conn.execute(
-                "INSERT INTO twin_nodes(id,organization_id,environment_id,source,external_id,kind,"
-                "subtype,name,first_observation_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                (
-                    node_id,
-                    self.org,
-                    self.env_id,
-                    self.source,
-                    row["object_id"],
-                    payload["kind"],
-                    payload.get("subtype", ""),
-                    payload["name"],
-                    observation,
-                ),
-            )
-            self.node_cache[row["object_id"]] = dict(
-                id=node_id, kind=payload["kind"], subtype=payload.get("subtype", "")
-            )
-            self.counts["created"] += 1
-        else:
-            if node["kind"] != payload["kind"]:
-                raise ValueError("Node kind cannot change")
-            node_id = node["id"]
-            self.counts["updated"] += 1
+        if node and node["kind"] != payload["kind"]:
+            raise ValueError("Node kind cannot change")
         desired = []
         for i, rev in enumerate(revisions):
             end = revisions[i + 1]["valid_from"] if i + 1 < len(revisions) else None
@@ -270,19 +333,40 @@ class Ingestor:
                     rev.get("attributes", {}),
                 )
             )
-        current = self.conn.execute(
-            "SELECT valid_from, valid_to, status, attributes, name FROM node_revisions "
-            "WHERE node_id=%s AND recorded_to IS NULL ORDER BY valid_from",
-            (node_id,),
-        ).fetchall()
-        if [
-            (r["valid_from"], r["valid_to"], r["status"], r["attributes"]) for r in current
-        ] == desired and all(r["name"] == payload["name"] for r in current):
+        observation = self.record(row, payload, fingerprint)
+        if not node:
+            node_id = uuid4()
+            self.conn.execute(
+                "INSERT INTO twin_nodes(id,organization_id,environment_id,source,external_id,kind,"
+                "subtype,name,first_observation_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (
+                    node_id,
+                    self.org,
+                    self.env_id,
+                    self.source,
+                    row["object_id"],
+                    payload["kind"],
+                    payload.get("subtype", ""),
+                    name,
+                    observation,
+                ),
+            )
+            self.node_cache[row["object_id"]] = dict(
+                id=node_id, kind=payload["kind"], subtype=payload.get("subtype", "")
+            )
+            self.counts["created"] += 1
+            current = []
+        else:
+            node_id = node["id"]
+            self.counts["updated"] += 1
+            current = self._node_revisions(node_id)
+        if [c[:4] for c in current] == desired and all(c[4] == name for c in current):
             return
-        self.conn.execute(
-            "UPDATE node_revisions SET recorded_to=now() WHERE node_id=%s AND recorded_to IS NULL",
-            (node_id,),
-        )
+        if current:
+            self.conn.execute(
+                "UPDATE node_revisions SET recorded_to=now() WHERE node_id=%s AND recorded_to IS NULL",
+                (node_id,),
+            )
         for valid_from, valid_to, status, attributes in desired:
             self.conn.execute(
                 "INSERT INTO node_revisions(id,organization_id,node_id,name,status,attributes,"
@@ -291,7 +375,7 @@ class Ingestor:
                     uuid4(),
                     self.org,
                     node_id,
-                    payload["name"],
+                    name,
                     status,
                     Jsonb(attributes),
                     valid_from,
@@ -299,6 +383,7 @@ class Ingestor:
                     observation,
                 ),
             )
+        self.node_current[node_id] = [(*d, name) for d in desired]
 
     def apply_relationship(self, row, payload, fingerprint):
         src, dst = self.node(payload["src"]), self.node(payload["dst"])
@@ -308,12 +393,18 @@ class Ingestor:
         attributes = dict(payload.get("attributes", {}))
         if attributes.get("origin") not in ORIGINS:
             attributes["origin"] = "unknown"
+        rel = self._relationship(row["object_id"])
+        identity = (payload["rel"], src["id"], dst["id"])
+        if rel and (rel["type"], rel["from_node"], rel["to_node"]) != identity:
+            raise ValueError("Relationship identity (type/endpoints) cannot change")
+        valid_from = parse_time(payload["valid_from"])
+        valid_to = parse_time(payload.get("valid_to"))
+        inferred = False
+        if payload["deleted"] and valid_to is None:
+            valid_to, inferred = datetime.now(timezone.utc), True
+        if valid_to is not None and valid_to <= valid_from:
+            raise ValueError("Relationship ends before it starts")
         observation = self.record(row, payload, fingerprint)
-        rel = self.conn.execute(
-            "SELECT id, type, from_node, to_node FROM relationships WHERE environment_id=%s "
-            "AND source=%s AND external_id=%s",
-            (self.env_id, self.source, row["object_id"]),
-        ).fetchone()
         if not rel:
             rel_id = uuid4()
             self.conn.execute(
@@ -331,42 +422,38 @@ class Ingestor:
                     dst["id"],
                 ),
             )
+            self.rels[row["object_id"]] = dict(
+                id=rel_id, type=payload["rel"], from_node=src["id"], to_node=dst["id"]
+            )
             self.counts["created"] += 1
+            current = []
         else:
-            if (rel["type"], rel["from_node"], rel["to_node"]) != (
-                payload["rel"],
-                src["id"],
-                dst["id"],
-            ):
-                raise ValueError("Relationship identity (type/endpoints) cannot change")
             rel_id = rel["id"]
             self.counts["updated"] += 1
-        valid_from = parse_time(payload["valid_from"])
-        valid_to = parse_time(payload.get("valid_to"))
-        inferred = False
-        if payload["deleted"] and valid_to is None:
-            valid_to, inferred = datetime.now(timezone.utc), True
-        if valid_to is not None and valid_to <= valid_from:
-            raise ValueError("Relationship ends before it starts")
-        current = self.conn.execute(
-            "SELECT valid_from, valid_to, attributes FROM relationship_revisions "
-            "WHERE relationship_id=%s AND recorded_to IS NULL",
-            (rel_id,),
-        ).fetchall()
-        if [(r["valid_from"], r["valid_to"], r["attributes"]) for r in current] == [
-            (valid_from, valid_to, attributes)
-        ]:
+            current = self._rel_revisions(rel_id)
+        if current == [(valid_from, valid_to, attributes)]:
             return
         if current and valid_to is not None and payload["deleted"]:
             self.counts["tombstoned"] += 1
-        self.close_and_insert(rel_id, attributes, valid_from, valid_to, inferred, observation)
-
-    def close_and_insert(self, rel_id, attributes, valid_from, valid_to, inferred, observation):
-        self.conn.execute(
-            "UPDATE relationship_revisions SET recorded_to=now() WHERE relationship_id=%s "
-            "AND recorded_to IS NULL",
-            (rel_id,),
+        self.close_and_insert(
+            rel_id,
+            attributes,
+            valid_from,
+            valid_to,
+            inferred,
+            observation,
+            had_current=bool(current),
         )
+
+    def close_and_insert(
+        self, rel_id, attributes, valid_from, valid_to, inferred, observation, had_current=True
+    ):
+        if had_current:
+            self.conn.execute(
+                "UPDATE relationship_revisions SET recorded_to=now() WHERE relationship_id=%s "
+                "AND recorded_to IS NULL",
+                (rel_id,),
+            )
         self.conn.execute(
             "INSERT INTO relationship_revisions(id,organization_id,relationship_id,attributes,"
             "valid_from,valid_to,end_inferred,observation_id) VALUES(%s,%s,%s,%s,%s,%s,%s,%s)",
@@ -381,6 +468,7 @@ class Ingestor:
                 observation,
             ),
         )
+        self.rel_current[rel_id] = [(valid_from, valid_to, attributes)]
 
     def _fact(self, row, payload, fingerprint, table, columns, values):
         exists = self.conn.execute(
@@ -499,6 +587,8 @@ def run_sync(conn, environment, actor_id, full=False):
     ).fetchall()
     rows.sort(key=lambda r: (ORDER[r["object_type"]], r["version"]))
     ingestor = Ingestor(conn, environment, run_id)
+    if len(rows) > PREFETCH_THRESHOLD or full:
+        ingestor.prefetch()
     for row in rows:
         ingestor.apply(row)
     if coverage == "complete_authoritative":

@@ -7,12 +7,13 @@ Design assessment, not discovered vulnerabilities. Phase 18 validation of each r
 | Browser/IdP spoofing | PKCE, state/nonce, token validation, secure sessions, MFA | Reject wrong issuer/audience/nonce; compromised endpoint remains risk |
 | API privilege escalation | Capability/object/field checks; independent role-change approval | Manipulated IDs and self-promotion denied |
 | Tenant data disclosure | RLS, composite FKs, scoped caches, transaction-local context | Test pooled scope, jobs, exports and citations; DB admin remains privileged |
+| Shared snapshot cache (Phase 19) | Process-level cache keyed by environment id and a graph version computed under the caller's RLS context; populated only after route authorization; LRU-bounded | `tests/api/test_snapshot_cache.py`: foreign tenant derives a different key and loads nothing; cached result equals uncached; any recorded change misses. Cache memory per process is a sizing risk |
 | Approval tampering/replay | Immutable digest, expiry, version checks, idempotency | Reject stale, altered and concurrent execution |
 | Malicious/incomplete ingestion | Provenance and authoritative coverage before deletion | Partial sync cannot imply absence; source may still lie |
 | Prompt injection | Read-only query allowlist, pre-retrieval authorization, citation validation | Adversarial tests; model prose stays advisory |
 | SSRF | Controlled endpoints, redirect validation, egress restrictions | Block arbitrary/internal metadata destinations |
 | Audit repudiation | Append-only permissions, hash chain, external checkpoint | App cannot alter/delete; infrastructure compromise remains |
-| Graph denial of service | Depth/node/time limits, quotas, cancellable jobs | Dense/cyclic fixtures; truncation visible |
+| Graph denial of service | Depth/node/time limits, quotas, cancellable jobs; depth/path bounds prune a branch, expansion/time stop the search | Dense/cyclic fixtures and a 10,000-identity benchmark (`docs/performance/`); truncation visible |
 | Uncertain external write | Idempotency, readback and reconciliation | Crash before/after write; recovery limited by source capabilities |
 | JIT expiry outage | Native TTL where possible, durable retry and alerts | Restart/time-boundary tests; disconnected source residual risk |
 | Lab escape | Scoped environments and sandbox-only execution capabilities | Manipulated environment IDs cannot reach production |

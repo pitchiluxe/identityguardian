@@ -17,10 +17,15 @@ ENV = UUID("20000000-0000-4000-8000-000000000001")
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=["migrate", "bootstrap"])
+    parser.add_argument("command", choices=["migrate", "bootstrap", "analyze"])
     args = parser.parse_args()
     load_dotenv(ROOT / ".env")
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"], connect_timeout=5) as conn:
+        if args.command == "analyze":
+            # Refresh planner statistics after bulk loads; stale statistics produce bad plans.
+            conn.execute("ANALYZE")
+            print("Statistics refreshed.")
+            return
         if args.command == "migrate":
             conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations(name text PRIMARY KEY)")
             if not conn.execute("SELECT 1 FROM pg_roles WHERE rolname='guardian_app'").fetchone():

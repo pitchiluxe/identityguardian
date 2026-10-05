@@ -40,22 +40,34 @@ class Bounds:
     expanded: int = 0
     found: int = 0
     reason: str | None = None
+    stopped: bool = False
     deadline: float = field(default=0.0)
 
     def start(self):
         self.deadline = time.monotonic() + self.seconds
         return self
 
+    def prune(self, reason):
+        """Depth and path bounds cut one branch: the result is partial, other branches continue."""
+        self.reason = self.reason or reason
+
     def exceeded(self):
-        if self.reason:
-            return True
-        if self.found >= self.paths:
-            self.reason = f"Path limit {self.paths} reached"
-        elif self.expanded >= self.nodes:
-            self.reason = f"Expansion limit {self.nodes} reached"
-        elif time.monotonic() > self.deadline:
-            self.reason = f"Time limit {self.seconds}s reached"
-        return bool(self.reason)
+        """Expansion and time bounds stop the whole search."""
+        if not self.stopped:
+            if self.expanded >= self.nodes:
+                self.reason, self.stopped = f"Expansion limit {self.nodes} reached", True
+            elif time.monotonic() > self.deadline:
+                self.reason, self.stopped = f"Time limit {self.seconds}s reached", True
+        return self.stopped
+
+    def admit(self, per_target: dict, target: str) -> bool:
+        """At most `paths` routes per entitlement target are kept; more mark the result partial."""
+        if per_target.get(target, 0) >= self.paths:
+            self.prune(f"Path limit {self.paths} per entitlement reached")
+            return False
+        per_target[target] = per_target.get(target, 0) + 1
+        self.found += 1
+        return True
 
 
 def edge_active(edge, at: datetime):
@@ -121,10 +133,10 @@ def walk(snap: Snapshot, identity: str, bounds: Bounds):
             path.append(edge)
             dst_kind = snap.nodes[edge.dst].kind
             if dst_kind in TERMINAL_KINDS:
-                bounds.found += 1
-                yield_list.append(list(path))
+                if bounds.admit(per_target, edge.dst):
+                    yield_list.append(list(path))
             elif len(path) >= bounds.depth:
-                bounds.reason = bounds.reason or f"Depth limit {bounds.depth} reached"
+                bounds.prune(f"Depth limit {bounds.depth} reached")
             else:
                 visited.add(edge.dst)
                 visit(edge.dst)
@@ -134,10 +146,11 @@ def walk(snap: Snapshot, identity: str, bounds: Bounds):
                 return
         if not followed and kind == "permission" and path:
             # Permission without a resource scope (e.g. a reset capability) is still an entitlement.
-            bounds.found += 1
-            yield_list.append(list(path))
+            if bounds.admit(per_target, node):
+                yield_list.append(list(path))
 
     yield_list: list = []
+    per_target: dict = {}
     visit(identity)
     return yield_list
 
@@ -192,20 +205,28 @@ def decide(paths):
     return "UNKNOWN"
 
 
-def usage_for(conn, identity_id, target_id, at):
-    if conn is None or target_id is None:
-        return None
-    last = conn.execute(
-        "SELECT max(occurred_at) AS last, count(*) AS n FROM usage_events WHERE identity_node=%s "
-        "AND target_node=%s AND occurred_at<=%s",
-        (identity_id, target_id, at),
-    ).fetchone()
-    coverage = conn.execute(
-        "SELECT covered_from, covered_to, completeness, observation_id FROM usage_coverage "
-        "WHERE target_node=%s AND covered_from<=%s ORDER BY covered_from",
-        (target_id, at),
-    ).fetchall()
-    return dict(last_observed_use=last["last"], observed_events=last["n"], coverage=coverage)
+def usage_for(conn, identity_id, targets, at):
+    """Observed use and coverage per target, fetched for all targets in two queries."""
+    targets = sorted({t for t in targets if t is not None})
+    if conn is None or not targets:
+        return {}
+    usage = {t: dict(last_observed_use=None, observed_events=0, coverage=[]) for t in targets}
+    for row in conn.execute(
+        "SELECT target_node, max(occurred_at) AS last, count(*) AS n FROM usage_events "
+        "WHERE identity_node=%s AND target_node=ANY(%s::uuid[]) AND occurred_at<=%s GROUP BY target_node",
+        (identity_id, targets, at),
+    ):
+        entry = usage[str(row["target_node"])]
+        entry["last_observed_use"], entry["observed_events"] = row["last"], row["n"]
+    for row in conn.execute(
+        "SELECT target_node, covered_from, covered_to, completeness, observation_id "
+        "FROM usage_coverage WHERE target_node=ANY(%s::uuid[]) AND covered_from<=%s "
+        "ORDER BY target_node, covered_from",
+        (targets, at),
+    ):
+        target = str(row.pop("target_node"))
+        usage[target]["coverage"].append(row)
+    return usage
 
 
 def effective_access(snap: Snapshot, identity: str, conn=None, bounds: Bounds | None = None):
@@ -230,6 +251,7 @@ def _effective_access(snap: Snapshot, identity: str, conn, bounds: Bounds | None
         grouped.setdefault(entitlement_key(snap, edges), []).append(
             summarize_path(snap, edges, denies)
         )
+    usage = usage_for(conn, identity, [key[0] for key in grouped], snap.effective_at)
     entries = []
     for (resource, permission, action), paths in grouped.items():
         paths.sort(key=lambda p: (ORDER[p["status"]], len(p["hops"])))
@@ -240,7 +262,7 @@ def _effective_access(snap: Snapshot, identity: str, conn, bounds: Bounds | None
                 action=action,
                 decision=decide(paths),
                 paths=paths,
-                usage=usage_for(conn, identity, resource, snap.effective_at),
+                usage=usage.get(resource),
             )
         )
     entries.sort(key=lambda e: (ORDER[e["decision"]], (e["resource"] or e["permission"])["name"]))
@@ -257,40 +279,68 @@ def _effective_access(snap: Snapshot, identity: str, conn, bounds: Bounds | None
 
 
 def principals_for(snap: Snapshot, target: str, bounds: Bounds | None = None):
-    """Who can reach a target: reverse discovery of candidate identities, then forward lineage."""
+    """Who can reach a target: reverse search over grant edges from the target to identities.
+
+    Each found route is a simple path in forward order; denies and conditions are then evaluated
+    per identity exactly as in effective_access. Bounds report partial results.
+    """
     if target not in snap.nodes:
         raise KeyError(target)
     bounds = (bounds or Bounds()).start()
-    candidates, stack, seen = set(), [target], {target}
-    while stack and not bounds.exceeded():
-        node = stack.pop()
+    found: dict = {}
+    per_identity: dict = {}
+    path: list = []
+    visited = {target}
+
+    def visit(node):
+        if bounds.exceeded():
+            return
         bounds.expanded += 1
         for edge in snap.inc[node]:
-            if edge.classification != "grant" or edge.src in seen:
+            source_kind = snap.nodes[edge.src].kind
+            if edge.type not in NEXT.get(source_kind, ()) or not edge_active(
+                edge, snap.effective_at
+            ):
                 continue
-            seen.add(edge.src)
-            if snap.nodes[edge.src].kind == "identity":
-                candidates.add(edge.src)
+            if edge.src in visited:
+                continue
+            path.insert(0, edge)
+            if source_kind == "identity":
+                if bounds.admit(per_identity, edge.src):
+                    found.setdefault(edge.src, []).append(list(path))
+            elif len(path) >= bounds.depth:
+                bounds.prune(f"Depth limit {bounds.depth} reached")
             else:
-                stack.append(edge.src)
+                visited.add(edge.src)
+                visit(edge.src)
+                visited.discard(edge.src)
+            path.pop(0)
+            if bounds.exceeded():
+                return
+
+    visit(target)
+    # A deny matters only on a permission some found route passes through. Without any such
+    # deny, the per-identity membership closure in denies_for cannot change a decision.
+    on_routes = {
+        e.dst
+        for routes in found.values()
+        for edges in routes
+        for e in edges
+        if snap.nodes[e.dst].kind == "permission"
+    }
+    deny_possible = any(
+        e.type == "DENY_ASSIGNMENT" and edge_active(e, snap.effective_at)
+        for permission in on_routes
+        for e in snap.inc[permission]
+    )
     results = []
-    for identity in sorted(candidates, key=lambda n: snap.nodes[n].name):
-        inner = Bounds(
-            depth=bounds.depth, paths=bounds.paths, nodes=bounds.nodes, seconds=bounds.seconds
-        ).start()
-        denies = denies_for(snap, identity)
-        paths = [
-            summarize_path(snap, edges, denies)
-            for edges in walk(snap, identity, inner)
-            if any(e.dst == target for e in edges)
-        ]
-        if inner.reason and not bounds.reason:
-            bounds.reason = inner.reason
-        if paths:
-            paths.sort(key=lambda p: (ORDER[p["status"]], len(p["hops"])))
-            results.append(
-                dict(identity=node_json(snap.nodes[identity]), decision=decide(paths), paths=paths)
-            )
+    for identity in sorted(found, key=lambda n: snap.nodes[n].name):
+        denies = denies_for(snap, identity) if deny_possible else {}
+        paths = [summarize_path(snap, edges, denies) for edges in found[identity]]
+        paths.sort(key=lambda p: (ORDER[p["status"]], len(p["hops"])))
+        results.append(
+            dict(identity=node_json(snap.nodes[identity]), decision=decide(paths), paths=paths)
+        )
     return dict(
         target=node_json(snap.nodes[target]),
         principals=results,

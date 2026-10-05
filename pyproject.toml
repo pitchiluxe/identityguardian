@@ -17,3 +17,6 @@ select = ["E4", "E7", "E9", "F", "I", "S"]
 "tests/**" = ["S101", "S105", "S106", "S311", "S603", "S607", "S608"]
 # Local setup runs fixed PostgreSQL binaries with argument lists (no shell).
 "scripts/native_postgres.py" = ["S603"]
+# Synthetic data generation and benchmark sampling; not security randomness.
+"scripts/benchmark.py" = ["S311"]
+"packages/fixtures/scale.py" = ["S311"]

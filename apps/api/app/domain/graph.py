@@ -4,8 +4,10 @@ A snapshot answers: which nodes/edges were effective at `effective_at`, accordin
 platform knew at `known_at`. Both default to now. Results carry a graph version for binding.
 """
 
+import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
+from copy import copy
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -61,6 +63,11 @@ class Snapshot:
                 self.inc[edge.dst].append(edge)
         return self
 
+    def at(self, effective_at, known_at):
+        clone = copy(self)
+        clone.effective_at, clone.known_at, clone.cache = effective_at, known_at, {}
+        return clone
+
     def by_external(self, external_id):
         return next((n for n in self.nodes.values() if n.external_id == external_id), None)
 
@@ -82,62 +89,160 @@ def utc(value):
     return value.astimezone(timezone.utc)
 
 
-def load(conn, environment_id, effective_at=None, known_at=None) -> Snapshot:
-    t, k = utc(effective_at), utc(known_at)
-    snapshot = Snapshot(t, k)
-    rows = conn.execute(
-        "SELECT n.id, n.external_id, n.kind, n.subtype, r.name, r.status, r.attributes "
-        "FROM twin_nodes n JOIN node_revisions r ON r.node_id=n.id "
-        "WHERE n.environment_id=%s AND r.recorded_from<=%s AND (r.recorded_to IS NULL OR r.recorded_to>%s) "
-        "AND r.valid_from<=%s AND (r.valid_to IS NULL OR r.valid_to>%s)",
-        (environment_id, k, k, t, t),
-    ).fetchall()
-    for r in rows:
-        snapshot.nodes[str(r["id"])] = Node(
-            str(r["id"]),
-            r["external_id"],
-            r["kind"],
-            r["subtype"],
-            r["name"],
-            r["status"],
-            r["attributes"],
-        )
-    rows = conn.execute(
-        "SELECT rr.id, r.id AS relationship_id, r.type, r.classification, r.from_node, r.to_node, "
-        "rr.attributes, rr.valid_from, rr.valid_to, rr.observation_id, rr.end_inferred, rr.recorded_from "
-        "FROM relationships r JOIN relationship_revisions rr ON rr.relationship_id=r.id "
-        "WHERE r.environment_id=%s AND rr.recorded_from<=%s AND (rr.recorded_to IS NULL OR rr.recorded_to>%s) "
-        "AND rr.valid_from<=%s AND (rr.valid_to IS NULL OR rr.valid_to>%s)",
-        (environment_id, k, k, t, t),
-    ).fetchall()
-    for r in rows:
-        expires = (r["attributes"] or {}).get("expires_at")
-        if expires and datetime.fromisoformat(expires) <= t:
-            continue  # source-native TTL: an expired grant is not effective even before revocation
-        snapshot.edges.append(
-            Edge(
+NODE_SQL = (
+    "SELECT n.id, n.external_id, n.kind, n.subtype, r.name, r.status, r.attributes, r.valid_from, r.valid_to "
+    "FROM twin_nodes n JOIN node_revisions r ON r.node_id=n.id WHERE n.environment_id=%s "
+)
+EDGE_SQL = (
+    "SELECT rr.id, r.id AS relationship_id, r.type, r.classification, r.from_node, r.to_node, "
+    "rr.attributes, rr.valid_from, rr.valid_to, rr.observation_id, rr.end_inferred, rr.recorded_from "
+    "FROM relationships r JOIN relationship_revisions rr ON rr.relationship_id=r.id WHERE r.environment_id=%s "
+)
+CURRENT = "AND {a}.recorded_to IS NULL"
+KNOWN_AT = "AND {a}.recorded_from<=%s AND ({a}.recorded_to IS NULL OR {a}.recorded_to>%s)"
+
+# Process-level cache of current-knowledge rows, keyed by environment and graph version. Callers
+# are authorized for the environment before load() runs; a new version (any recorded change)
+# simply misses the cache, so invalidation is scoped to the environment that changed.
+_CACHE: OrderedDict = OrderedDict()
+_BUILT: OrderedDict = OrderedDict()
+_CACHE_LOCK = threading.Lock()
+CACHE_ENTRIES = 6
+cache_stats = dict(hits=0, misses=0)
+
+
+# Current knowledge is versioned by a trigger-maintained counter (migration 021): every write to
+# the environment's nodes, relationships or revisions increments it.
+VERSION_CURRENT = "SELECT changes FROM graph_watermarks WHERE environment_id=%(env)s"
+VERSION_KNOWN_AT = (
+    "SELECT (SELECT max(rr.recorded_from) FROM relationship_revisions rr JOIN relationships r "
+    "ON r.id=rr.relationship_id WHERE r.environment_id=%(env)s AND rr.recorded_from<=%(k)s) AS rm, "
+    "(SELECT count(*) FROM relationship_revisions rr JOIN relationships r ON r.id=rr.relationship_id "
+    "WHERE r.environment_id=%(env)s AND rr.recorded_from<=%(k)s) AS rn, "
+    "(SELECT max(nr.recorded_from) FROM node_revisions nr JOIN twin_nodes n ON n.id=nr.node_id "
+    "WHERE n.environment_id=%(env)s AND nr.recorded_from<=%(k)s) AS nm, "
+    "(SELECT count(*) FROM node_revisions nr JOIN twin_nodes n ON n.id=nr.node_id "
+    "WHERE n.environment_id=%(env)s AND nr.recorded_from<=%(k)s) AS nn"
+)
+
+
+def graph_version(conn, environment_id, known_at=None) -> str:
+    """Identifies a knowledge state: any recorded node or relationship change yields a new value."""
+    if known_at is None:
+        row = conn.execute(VERSION_CURRENT, dict(env=environment_id)).fetchone()
+        return digest(f"{environment_id}:current:{row['changes'] if row else 0}")[:16]
+    row = conn.execute(VERSION_KNOWN_AT, dict(env=environment_id, k=known_at)).fetchone()
+    return digest(f"{environment_id}:{row['rm']}:{row['rn']}:{row['nm']}:{row['nn']}")[:16]
+
+
+def _rows(conn, environment_id, known_at):
+    if known_at is None:
+        nodes = conn.execute(NODE_SQL + CURRENT.format(a="r"), (environment_id,)).fetchall()
+        edges = conn.execute(EDGE_SQL + CURRENT.format(a="rr"), (environment_id,)).fetchall()
+    else:
+        nodes = conn.execute(
+            NODE_SQL + KNOWN_AT.format(a="r"), (environment_id, known_at, known_at)
+        ).fetchall()
+        edges = conn.execute(
+            EDGE_SQL + KNOWN_AT.format(a="rr"), (environment_id, known_at, known_at)
+        ).fetchall()
+    node_items = [
+        (
+            r["valid_from"],
+            r["valid_to"],
+            Node(
                 str(r["id"]),
-                str(r["relationship_id"]),
-                r["type"],
-                r["classification"],
-                str(r["from_node"]),
-                str(r["to_node"]),
+                r["external_id"],
+                r["kind"],
+                r["subtype"],
+                r["name"],
+                r["status"],
                 r["attributes"],
-                r["valid_from"],
-                r["valid_to"],
-                str(r["observation_id"]),
-                r["end_inferred"],
-                r["recorded_from"],
+            ),
+        )
+        for r in nodes
+    ]
+    edge_items = []
+    for r in edges:
+        expires = (r["attributes"] or {}).get("expires_at")
+        edge_items.append(
+            (
+                datetime.fromisoformat(expires) if expires else None,
+                Edge(
+                    str(r["id"]),
+                    str(r["relationship_id"]),
+                    r["type"],
+                    r["classification"],
+                    str(r["from_node"]),
+                    str(r["to_node"]),
+                    r["attributes"],
+                    r["valid_from"],
+                    r["valid_to"],
+                    str(r["observation_id"]),
+                    r["end_inferred"],
+                    r["recorded_from"],
+                ),
             )
         )
-    watermark = conn.execute(
-        "SELECT max(recorded_from) AS m, count(*) AS n FROM relationship_revisions rr "
-        "JOIN relationships r ON r.id=rr.relationship_id WHERE r.environment_id=%s "
-        "AND rr.recorded_from<=%s",
-        (environment_id, k),
-    ).fetchone()
-    snapshot.version = digest(f"{environment_id}:{watermark['m']}:{watermark['n']}")[:16]
-    return snapshot.index()
+    return node_items, edge_items
+
+
+def load(conn, environment_id, effective_at=None, known_at=None, use_cache=True) -> Snapshot:
+    t, k = utc(effective_at), utc(known_at)
+    current = known_at is None or k >= datetime.now(timezone.utc)
+    version = graph_version(conn, environment_id, None if current else k)
+    key = (str(environment_id), version)
+    cacheable = current and use_cache
+    cached = None
+    if cacheable:
+        with _CACHE_LOCK:
+            cached = _CACHE.get(key)
+            if cached:
+                _CACHE.move_to_end(key)
+                cache_stats["hits"] += 1
+    if cached is None:
+        cached = _rows(conn, environment_id, None if current else k)
+        # Rows and version come from separate statements; a commit in between would pair newer
+        # rows with an older version, so such a load is served but never cached.
+        cacheable = cacheable and graph_version(conn, environment_id) == version
+        if cacheable:
+            with _CACHE_LOCK:
+                cache_stats["misses"] += 1
+                _CACHE[key] = cached
+                while len(_CACHE) > CACHE_ENTRIES:
+                    _CACHE.popitem(last=False)
+    if cacheable:
+        with _CACHE_LOCK:
+            built = _BUILT.get(key)
+        # A built snapshot stays exact until the next validity or expiry boundary after it.
+        if built and built[0] <= t < built[1]:
+            return built[2].at(t, k)
+    node_items, edge_items = cached
+    snapshot = Snapshot(t, k)
+    horizon = datetime.max.replace(tzinfo=timezone.utc)
+    for valid_from, valid_to, node in node_items:
+        if valid_from <= t and (valid_to is None or valid_to > t):
+            snapshot.nodes[node.id] = node
+            if valid_to is not None:
+                horizon = min(horizon, valid_to)
+        elif valid_from > t:
+            horizon = min(horizon, valid_from)
+    for expires, edge in edge_items:
+        if edge.valid_from > t:
+            horizon = min(horizon, edge.valid_from)
+        elif (edge.valid_to is None or edge.valid_to > t) and not (expires and expires <= t):
+            snapshot.edges.append(edge)
+            for boundary in (edge.valid_to, expires):
+                if boundary is not None:
+                    horizon = min(horizon, boundary)
+    snapshot.version = version
+    snapshot.index()
+    if cacheable:
+        with _CACHE_LOCK:
+            _BUILT[key] = (t, horizon, snapshot)
+            while len(_BUILT) > CACHE_ENTRIES:
+                _BUILT.popitem(last=False)
+    return snapshot
 
 
 def node_json(node: Node):

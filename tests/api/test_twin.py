@@ -185,6 +185,21 @@ def test_invalid_records_are_rejected_without_partial_writes(client, twin):
     assert "grp-erp-operators" in groups
 
 
+def test_malformed_node_leaves_no_observation(client, twin):
+    """Phase 19 removed per-object savepoints: every check must run before the first write."""
+    base, headers = twin["base"], twin["headers"]
+
+    def nameless(body):
+        body.pop("name")
+        return body, False
+
+    source_update(twin["env"], "idn-tom", nameless)
+    for _ in range(2):  # a recorded observation would make the retry "unchanged", not rejected
+        run = client.post(base + "/connectors/sandbox/sync", json={}, headers=headers).json()
+        assert run["data"]["status"] == "PARTIAL" and run["data"]["rejected"] == 1
+    assert client.get(base + "/nodes/idn-tom").json()["data"]["node"]["name"]
+
+
 def test_partial_sync_never_implies_absence(client, twin):
     base, headers = twin["base"], twin["headers"]
     source_update(twin["env"], "mem-tom-grp-erp-operators", delete_row=True)

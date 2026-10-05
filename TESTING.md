@@ -22,7 +22,7 @@ npx playwright test                                 # needs built web, API on :8
 
 Phase 1 review-focus cases exercised: pooled tenant context, cross-tenant forged IDs, revoked membership, self-promotion and non-independent approval, stale digest/version, attacker-supplied role fields, audit rollback on failed transaction, interrupted/replayed login state, forged-cookie rate-limit reset and approval revocation while waiting for the execution lock. Two regressions were reproduced red before their fixes, then green.
 
-Not yet covered: approve/execute through the browser with real MFA (realm issues password-only sessions), DST/clock and performance tests, independent penetration testing. Planned layers below apply to later phases.
+Not yet covered: approve/execute through the browser with real MFA (realm issues password-only sessions), DST/clock tests, independent penetration testing. Phase 19 synthetic benchmarks and their limitations are in docs/plans/phase-19-performance.md. Planned layers below apply to later phases.
 
 | Layer | Required cases |
 |---|---|

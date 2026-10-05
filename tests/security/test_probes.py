@@ -69,7 +69,7 @@ def test_csrf_and_origin_are_enforced_before_validation(client, twin):
 
 def test_validation_errors_never_echo_input(client, twin):
     headers = as_user(client, twin["people"], "admin")
-    secret = "super-secret-webhook-value-123"
+    secret = "super-secret-webhook-value-123"  # secret-scan: allow (fake probe value)
     response = client.post(
         twin["base"] + "/connectors",
         headers=headers,

@@ -1,0 +1,86 @@
+{
+  "date": "2026-10-05T01:47:55.658698+00:00",
+  "hardware": {
+    "os": "Windows-11-10.0.26340-SP0",
+    "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "logical_cpus": 8,
+    "ram_gib": 23.7,
+    "python": "3.12.14"
+  },
+  "parameters": {
+    "identities": 10000,
+    "samples": 200,
+    "http": "http://127.0.0.1:8000",
+    "concurrency": 10,
+    "requests": 300
+  },
+  "postgres": "17.7",
+  "dataset": {
+    "objects": 124594,
+    "relationships": 103174,
+    "nodes": 21420
+  },
+  "bulk_source_load_s": 25.7,
+  "ingest": {
+    "seconds": 448.1,
+    "objects_per_second": 278,
+    "status": "SUCCEEDED",
+    "created": 124594,
+    "rejected": 0
+  },
+  "analyze_s": 5.7,
+  "snapshot_load_uncached": {
+    "n": 3,
+    "p50_ms": 7155.8,
+    "p95_ms": 7425.3,
+    "p99_ms": 7425.3,
+    "mean_ms": 6995.2,
+    "max_ms": 7425.3
+  },
+  "snapshot_load_cached": {
+    "n": 10,
+    "p50_ms": 752.1,
+    "p95_ms": 3155.9,
+    "p99_ms": 3155.9,
+    "mean_ms": 1794.1,
+    "max_ms": 3155.9
+  },
+  "snapshot": {
+    "nodes": 21420,
+    "edges": 103174
+  },
+  "effective_access": {
+    "n": 200,
+    "p50_ms": 223.2,
+    "p95_ms": 336.6,
+    "p99_ms": 882.4,
+    "mean_ms": 238.0,
+    "max_ms": 1212.7,
+    "partial_results": 149
+  },
+  "who_can_access": {
+    "n": 20,
+    "p50_ms": 1827.3,
+    "p95_ms": 3648.9,
+    "p99_ms": 3934.9,
+    "mean_ms": 1634.2,
+    "max_ms": 3934.9,
+    "partial_results": 11
+  },
+  "neighbourhood_depth2": {
+    "n": 20,
+    "p50_ms": 0.1,
+    "p95_ms": 0.2,
+    "p99_ms": 0.3,
+    "mean_ms": 0.1,
+    "max_ms": 0.3
+  },
+  "attack_paths_single_source": {
+    "seconds": 0.18,
+    "complete": true,
+    "paths": 0
+  },
+  "http_effective_access": {
+    "error": "HTTPStatusError: API not reachable or failed"
+  }
+}

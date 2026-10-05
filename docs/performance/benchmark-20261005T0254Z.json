@@ -1,0 +1,89 @@
+{
+  "date": "2026-10-05T02:49:54.078294+00:00",
+  "hardware": {
+    "os": "Windows-11-10.0.26340-SP0",
+    "processor": "Intel64 Family 6 Model 154 Stepping 4, GenuineIntel",
+    "logical_cpus": 8,
+    "ram_gib": 23.7,
+    "python": "3.12.14"
+  },
+  "parameters": {
+    "identities": 10000,
+    "samples": 200,
+    "http": "http://127.0.0.1:8000",
+    "concurrency": 10,
+    "requests": 300,
+    "reuse": true
+  },
+  "postgres": "17.7",
+  "dataset": {
+    "objects": 124594,
+    "relationships": 103174,
+    "nodes": 21420
+  },
+  "ingest": {
+    "reused_environment": "b6bdb988-6fc9-442b-bc13-0bdde358957c"
+  },
+  "analyze_s": 8.2,
+  "snapshot_load_uncached": {
+    "n": 3,
+    "p50_ms": 13979.3,
+    "p95_ms": 15054.8,
+    "p99_ms": 15054.8,
+    "mean_ms": 13746.9,
+    "max_ms": 15054.8
+  },
+  "snapshot_load_cached": {
+    "n": 10,
+    "p50_ms": 1.8,
+    "p95_ms": 431.1,
+    "p99_ms": 431.1,
+    "mean_ms": 44.8,
+    "max_ms": 431.1
+  },
+  "snapshot": {
+    "nodes": 21420,
+    "edges": 103174
+  },
+  "effective_access": {
+    "n": 200,
+    "p50_ms": 66.3,
+    "p95_ms": 94.0,
+    "p99_ms": 1493.6,
+    "mean_ms": 107.3,
+    "max_ms": 2656.3,
+    "partial_results": 149
+  },
+  "who_can_access": {
+    "n": 20,
+    "p50_ms": 3769.3,
+    "p95_ms": 6394.5,
+    "p99_ms": 9151.5,
+    "mean_ms": 3548.4,
+    "max_ms": 9151.5,
+    "partial_results": 11
+  },
+  "neighbourhood_depth2": {
+    "n": 20,
+    "p50_ms": 0.2,
+    "p95_ms": 0.6,
+    "p99_ms": 0.9,
+    "mean_ms": 0.3,
+    "max_ms": 0.9
+  },
+  "attack_paths_single_source": {
+    "seconds": 0.06,
+    "complete": true,
+    "paths": 0
+  },
+  "http_effective_access": {
+    "n": 300,
+    "p50_ms": 1263.0,
+    "p95_ms": 5899.6,
+    "p99_ms": 24865.0,
+    "mean_ms": 2289.2,
+    "max_ms": 31935.7,
+    "concurrency": 10,
+    "throughput_rps": 3.4
+  }
+}

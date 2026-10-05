@@ -58,6 +58,7 @@ def run_job(db, org: UUID, connector_id: UUID, mode: str, actor_id=None, backoff
         0,
     )
     errors = []
+    ingestor = None
     while True:
         attempt = 0
         while True:
@@ -97,13 +98,17 @@ def run_job(db, org: UUID, connector_id: UUID, mode: str, actor_id=None, backoff
                     "FAILING",
                 )
         with db.transaction(org) as conn:
-            ingestor = Ingestor(conn, environment, run_id, source=connector["kind"])
+            if ingestor is None:  # existing state is loaded once per job, then kept current
+                ingestor = Ingestor(conn, environment, run_id, source=connector["kind"]).prefetch()
+            ingestor.conn = conn
+            before = dict(ingestor.counts)
+            errors_before = len(ingestor.errors)
             for row in sorted(page.objects, key=lambda r: (ORDER[r["object_type"]], r["version"])):
                 ingestor.apply(row)
                 seen.add(row["object_id"])
             for k, v in ingestor.counts.items():
-                totals[k] += v
-            errors += ingestor.errors
+                totals[k] += v - before[k]
+            errors += ingestor.errors[errors_before:]
             pages += 1
             conn.execute(
                 "UPDATE sync_runs SET observed=%s, unchanged=%s, created=%s, updated=%s, rejected=%s, "
