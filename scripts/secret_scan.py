@@ -12,6 +12,8 @@ PATTERNS = {
     "AWS access key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     "GitHub token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"),
     "Slack token": re.compile(r"\bxox[abpors]-[A-Za-z0-9-]{10,}\b"),
+    "Anthropic API key": re.compile(r"\bsk-ant-[A-Za-z0-9_-]{20,}"),
+    "OpenAI API key": re.compile(r"\bsk-(?!ant-)(?:proj-)?[A-Za-z0-9_-]{20,}"),
     "JWT": re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"),
     "assigned secret": re.compile(
         r"(?i)\b(password|passwd|secret|api_key|client_secret|master_key|signing_key)\s*[=:]\s*"

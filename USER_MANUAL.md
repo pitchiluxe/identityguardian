@@ -239,6 +239,24 @@ Members ask for role changes by emailing **[erickomari243@gmail.com](mailto:eric
 
 ---
 
+## 7a. AI providers (Settings → AI)
+
+The investigator and the lab instructor can use one of three AI providers. All of them only **explain** evidence you are allowed to see. They cannot change access, and their claims are checked against the evidence.
+
+| Provider | Where it runs | What you need |
+|---|---|---|
+| **Ollama** (default) | On the platform's own server; evidence never leaves it | Ollama installed on the server: <https://ollama.com/download>, then `ollama pull qwen2.5:7b` (or the model set in Settings) |
+| **Claude** (Anthropic) | Anthropic's cloud | Your own Anthropic API key, and your administrator must allow hosted providers |
+| **ChatGPT** (OpenAI) | OpenAI's cloud | Your own OpenAI API key plus the model ID to use, and your administrator must allow hosted providers |
+
+**To use Claude or ChatGPT:**
+1. An **org_admin** ticks **Allow hosted AI providers for this organization** in Settings.
+2. Paste your API key in **Settings → API keys** and click **Save key**. It is encrypted and never shown again; only its last 4 characters are.
+3. Tick the box confirming that evidence for your questions is sent to the provider.
+4. Choose the provider. Use **Test connection** to check it.
+
+Need hosted AI turned on for your organization? Email **[erickomari243@gmail.com](mailto:erickomari243@gmail.com)**.
+
 ## 8. Troubleshooting
 
 | You see | What it means | What to do |
@@ -251,6 +269,7 @@ Members ask for role changes by emailing **[erickomari243@gmail.com](mailto:eric
 | *"Recent verified MFA is required"* | Approve/execute needs a fresh sign-in with your code | Sign out, sign in again, retry within 5 minutes |
 | One-time code rejected | Code expired or phone clock is off | Wait for the next code and check your phone's time is set automatically |
 | *"Request limit reached; retry shortly"* | Too many requests per minute | Wait a minute |
+| *"AI unavailable (…)"* in Investigations | Ollama isn't running, or your hosted provider isn't set up | Check **Settings → AI**: start Ollama, or save a key and confirm egress |
 | *"Database unavailable…"* | Server-side problem | Try again shortly; if it persists, email **erickomari243@gmail.com** |
 | Lost your phone / authenticator | Can't produce codes | Email **erickomari243@gmail.com** to have your one-time code reset |
 

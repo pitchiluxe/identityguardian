@@ -11,7 +11,7 @@ from apps.api.app.ai import registry
 from tests.api.conftest import as_user
 from tests.api.test_investigations import Fake, ask, fact_ids
 
-CANARY = "sk-ant-CANARY-0123456789abcdefghijklmnopqrstu"
+CANARY = "sk-ant-CANARY-0123456789abcdefghijklmnopqrstu"  # secret-scan: allow - synthetic canary
 
 
 @pytest.fixture(autouse=True)
@@ -71,7 +71,13 @@ def test_hosted_choice_refused_without_policy_or_key(client, twin):
     put(client, twin, "admin", "/policy", {"allow_hosted_ai": True})
     response = put(client, twin, "investigator", "/settings", {"provider": "anthropic"})
     assert response.status_code == 409 and "API key" in response.json()["detail"]
-    save_key(client, twin, "investigator", "openai", "sk-proj-0123456789abcdefghij")
+    save_key(
+        client,
+        twin,
+        "investigator",
+        "openai",
+        "sk-proj-0123456789abcdefghij",  # secret-scan: allow - synthetic canary
+    )  # secret-scan: allow - synthetic canary
     response = put(client, twin, "investigator", "/settings", {"provider": "openai"})
     assert response.status_code == 409 and "model" in response.json()["detail"]
 

@@ -26,3 +26,10 @@ def test_scanner_detects_planted_credentials(tmp_path):
         "connection string with password",
         "environment file is tracked",
     }
+
+
+def test_scanner_detects_ai_provider_keys(tmp_path):
+    (tmp_path / "a.txt").write_text("key " + "sk-ant-" + "api03-" + "A" * 40)
+    (tmp_path / "o.txt").write_text("key " + "sk-" + "proj-" + "B" * 40)
+    found = {f[2] for f in scan(sorted(tmp_path.iterdir()))}
+    assert found == {"Anthropic API key", "OpenAI API key"}

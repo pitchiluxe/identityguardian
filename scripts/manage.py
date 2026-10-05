@@ -199,8 +199,11 @@ def main():
     parser.add_argument("--verify-audit", action="store_true", help="status: verify audit chains")
     args = parser.parse_args()
     load_dotenv(ROOT / ".env")
-    from apps.api.app.config import secret
+    from apps.api.app.config import Settings, secret
 
+    if args.command == "bootstrap" and not Settings().development:
+        # Refuse before touching the database: synthetic data never reaches a production DB.
+        raise SystemExit("bootstrap creates SYNTHETIC data and is disabled outside development")
     with psycopg.connect(secret("MIGRATION_DATABASE_URL"), connect_timeout=5) as conn:
         if args.command == "status":
             raise SystemExit(status(conn, args.verify_audit))
@@ -252,12 +255,6 @@ def main():
                     conn.execute("INSERT INTO schema_migrations VALUES (%s)", (path.name,))
                     print("Applied", path.name)
         else:
-            from apps.api.app.config import Settings
-
-            if not Settings().development:
-                raise SystemExit(
-                    "bootstrap creates SYNTHETIC data and is disabled outside development"
-                )
             conn.execute("SELECT pg_advisory_xact_lock(10001)")
             if conn.execute("SELECT 1 FROM organizations").fetchone():
                 raise SystemExit("Bootstrap already completed; refusing to overwrite memberships.")
