@@ -2,10 +2,12 @@
 
 import hashlib
 import hmac
+import logging
 import time
 from typing import Literal
 from uuid import UUID, uuid4
 
+from cryptography.exceptions import InvalidTag
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -200,9 +202,20 @@ async def webhook(org: UUID, env: UUID, connector_id: UUID, request: Request):
         ).fetchone()
         if not row or not row["secret_envelope"]:
             raise HTTPException(401, "Webhook verification failed")
-        secret = open_envelope(
-            row["secret_envelope"], settings.secret_master_key, f"connector:{connector_id}"
-        )
+        try:
+            secret = open_envelope(
+                row["secret_envelope"],
+                settings.secret_master_key,
+                f"connector:{connector_id}",
+                settings.secret_master_key_previous,
+            )
+        except (ValueError, InvalidTag):
+            # Key withdrawn or misconfigured: fail closed, tell the operator, not the sender.
+            logging.getLogger("identityguardian").error(
+                "Connector %s secret cannot be opened with the configured master keys",
+                connector_id,
+            )
+            raise HTTPException(503, "Webhook verification unavailable") from None
         expected = hmac.new(secret.encode(), f"{stamp}.".encode() + raw, hashlib.sha256).hexdigest()
         if not hmac.compare_digest("sha256=" + expected, signature):
             raise HTTPException(401, "Webhook verification failed")

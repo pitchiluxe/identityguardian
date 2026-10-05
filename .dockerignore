@@ -1,0 +1,14 @@
+# Build context allowlist: secrets, local runtime data and VCS never enter an image.
+*
+!apps/
+!packages/
+!migrations/
+!scripts/
+!requirements.lock
+!package.json
+!package-lock.json
+!tsconfig.json
+apps/web/dist
+**/__pycache__
+**/node_modules
+**/*.pyc

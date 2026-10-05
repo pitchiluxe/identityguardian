@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from fastapi.testclient import TestClient
 
 from apps.api.app.config import Settings
+from apps.api.app.db import Database
 from apps.api.app.main import create_app
 from apps.api.app.security import digest
 
@@ -50,10 +51,19 @@ def tenant():
     return org, other, people
 
 
+@pytest.fixture(scope="session")
+def shared_db():
+    # One pool per xdist worker. A fresh pool per test opened hundreds of backends, and PostgreSQL
+    # backend startup on Windows under parallel load exceeded the connect timeout (Phase 19).
+    db = Database(Settings().database_url)
+    yield db
+    db.close()
+
+
 @pytest.fixture
-def client():
+def client(shared_db):
     settings = Settings(read_limit_per_minute=5000, write_limit_per_minute=1000)
-    with TestClient(create_app(settings), base_url="http://localhost:8000") as value:
+    with TestClient(create_app(settings, db=shared_db), base_url="http://localhost:8000") as value:
         yield value
 
 

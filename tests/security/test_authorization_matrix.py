@@ -21,6 +21,7 @@ from tests.api.conftest import as_user
 
 PUBLIC = {
     "/api/v1/health",
+    "/api/v1/ready",
     "/api/v1/auth/login",
     "/api/v1/auth/callback",
     "/api/v1/organizations/{org}/environments/{env}/connectors/{connector_id}/webhook",

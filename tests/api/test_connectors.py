@@ -246,3 +246,43 @@ def test_admins_create_sandbox_environments_but_never_production(client, twin):
                 "INSERT INTO environments(id,organization_id,name,kind) VALUES(%s,%s,'p','PRODUCTION')",
                 (uuid4(), twin["org"]),
             )
+
+
+def test_master_key_rotation_rewraps_and_withdrawn_key_fails_closed(client, twin):
+    from apps.api.app.config import Settings
+    from scripts.manage import rotate_master_key
+
+    settings = client.app.state.settings
+    old = settings.secret_master_key
+    connector = create(client, twin, webhook_secret=SECRET)
+    url = twin["base"] + f"/connectors/{connector['id']}/webhook"
+    body = b'{"changes":["users"]}'
+    client.cookies.clear()
+
+    new = base64.b64encode(os.urandom(32)).decode()
+    settings.secret_master_key, settings.secret_master_key_previous = new, []
+    assert client.post(url, content=body, headers=signed(body)).status_code == 503  # fails closed
+
+    settings.secret_master_key_previous = [old]
+    assert client.post(url, content=body, headers=signed(body)).status_code == 202
+
+    operator = Settings(secret_master_key=new, secret_master_key_previous=[old])
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        assert rotate_master_key(conn, operator, twin["org"]) == dict(
+            rewrapped=1, current=0, unavailable=0
+        )
+        assert rotate_master_key(conn, operator, twin["org"])["current"] == 1  # idempotent
+        assert rotate_master_key(conn, Settings(secret_master_key=old), twin["org"]) == dict(
+            rewrapped=0,
+            current=0,
+            unavailable=1,  # reported, never silently skipped
+        )
+        audited = conn.execute(
+            "SELECT count(*) FROM audit_events WHERE organization_id=%s "
+            "AND action='connector.secret_rewrapped'",
+            (twin["org"],),
+        ).fetchone()[0]
+    assert audited == 1
+
+    settings.secret_master_key_previous = []  # old key retired after rotation
+    assert client.post(url, content=body, headers=signed(body)).status_code == 202

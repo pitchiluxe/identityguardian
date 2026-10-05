@@ -8,10 +8,13 @@ import argparse
 import logging
 import os
 import time
+from pathlib import Path
 from uuid import UUID
 
 from dotenv import load_dotenv
 
+from apps.api.app import logs
+from apps.api.app.config import secret
 from apps.api.app.connectors.runner import run_job
 from apps.api.app.db import Database
 from apps.api.app.domain.execution import execute_change, expire_jit, purge_reports, reconcile
@@ -78,13 +81,17 @@ def main():
     args = parser.parse_args()
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
-    db = Database(os.environ["WORKER_DATABASE_URL"])
+    logs.configure(os.environ.get("LOG_FORMAT", "text"))
+    db = Database(secret("WORKER_DATABASE_URL"))
+    heartbeat = os.environ.get("WORKER_HEARTBEAT_FILE")
     while True:
         for org in [args.organization] if args.organization else organizations(db):
             try:
                 tick(db, org)
             except Exception:  # keep serving other organizations; the failure is logged
                 log.exception("Worker tick failed for organization %s", org)
+        if heartbeat:  # container healthcheck: a stale file means the loop is stuck
+            Path(heartbeat).touch()
         if args.once:
             return
         time.sleep(args.interval)

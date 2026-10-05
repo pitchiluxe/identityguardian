@@ -1,0 +1,22 @@
+# TLS edge for IdentityGuardian AI (Phase 20).
+# IG_DOMAIN=localhost uses Caddy's internal CA (local acceptance only); a public name obtains a
+# certificate automatically. Closes U2: every body, chunked or not, is capped at 1 MB here.
+{$IG_DOMAIN:localhost} {
+	request_body {
+		max_size 1MB
+	}
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+	}
+	# Probes are for the orchestrator on the internal network, not the internet.
+	@probes path /api/v1/ready
+	respond @probes 404
+	reverse_proxy api:8000 {
+		header_up X-Forwarded-Proto https
+	}
+	log {
+		output stdout
+		format json
+	}
+}

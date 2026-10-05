@@ -15,11 +15,13 @@ from psycopg.types.json import Jsonb
 from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
+from . import logs
 from .ai.provider import OllamaProvider
 from .auth import authenticate, begin_login, complete_login, membership, require_session
 from .config import Settings
 from .db import Database
 from .limits import within_quota
+from .logs import JsonFormatter  # noqa: F401  (re-exported for the worker and tests)
 from .routes import ROUTERS
 from .security import ROLE_CAPABILITIES, capabilities, digest, require_recent_mfa
 
@@ -68,11 +70,20 @@ def mfa(session):
         raise HTTPException(403, str(exc)) from None
 
 
-def create_app(settings=None):
+PROBES = {"/api/v1/health", "/api/v1/ready"}
+MIGRATIONS = Path(__file__).resolve().parents[3] / "migrations"
+
+
+def expected_migrations():
+    return len(list(MIGRATIONS.glob("*.sql")))
+
+
+def create_app(settings=None, db=None):
     @asynccontextmanager
     async def lifespan(app):
         yield
-        app.state.db.close()
+        if owns_db:  # a shared database belongs to its creator
+            app.state.db.close()
 
     app = FastAPI(
         lifespan=lifespan,
@@ -83,7 +94,9 @@ def create_app(settings=None):
         openapi_url=None,
     )
     app.state.settings = settings or Settings()
-    app.state.db = Database(app.state.settings.database_url)
+    logs.configure(app.state.settings.log_format)
+    owns_db = db is None
+    app.state.db = db or Database(app.state.settings.database_url)
     app.state.llm, app.state.llm_error = None, None
     if app.state.settings.ai_enabled:
         try:
@@ -116,7 +129,7 @@ def create_app(settings=None):
                 headers={"X-Correlation-ID": str(request.state.correlation)},
             )
         try:
-            if request.url.path.startswith("/api/") and request.url.path != "/api/v1/health":
+            if request.url.path.startswith("/api/") and request.url.path not in PROBES:
                 if not await run_in_threadpool(within_quota, request):
                     response = JSONResponse(
                         {"detail": "Request limit reached; retry shortly"},
@@ -130,7 +143,9 @@ def create_app(settings=None):
         except psycopg.Error:
             # Logged server-side with the correlation ID; the client receives no SQL details.
             logging.getLogger("identityguardian").exception(
-                "Database error (correlation %s)", request.state.correlation
+                "Database error (correlation %s)",
+                request.state.correlation,
+                extra={"correlation_id": request.state.correlation},
             )
             response = JSONResponse(
                 {"detail": "Database unavailable; contact the local administrator"}, 503
@@ -151,7 +166,22 @@ def create_app(settings=None):
 
     @app.get("/api/v1/health")
     def health():
-        return {"status": "ok", "phase": 1, "mode": "foundation"}
+        # Liveness: the process answers. Never touches the database.
+        return {"status": "ok"}
+
+    @app.get("/api/v1/ready")
+    def ready():
+        # Readiness: database reachable and every migration shipped with this build applied.
+        # Status and a fixed reason only; no versions, counts or connection details.
+        try:
+            with app.state.db.transaction() as conn:
+                applied = conn.execute("SELECT count(*) AS n FROM schema_migrations").fetchone()
+        except psycopg.Error:
+            logging.getLogger("identityguardian").warning("Readiness: database unavailable")
+            return JSONResponse({"status": "not_ready", "reason": "database unavailable"}, 503)
+        if applied["n"] < expected_migrations():
+            return JSONResponse({"status": "not_ready", "reason": "migrations pending"}, 503)
+        return {"status": "ready"}
 
     app.get("/api/v1/auth/login")(begin_login)
     app.get("/api/v1/auth/callback")(complete_login)

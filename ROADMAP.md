@@ -1,6 +1,6 @@
 # Phased implementation roadmap
 
-Every phase requires architecture/dependency inspection, bounded plan, implementation, tests, security/regression checks, documentation and a phase-owned commit. Phase 0 is awaiting review; all other phases are planned. No timing estimates imply completed capability.
+Every phase requires architecture/dependency inspection, bounded plan, implementation, tests, security/regression checks, documentation and a phase-owned commit. Status (2026-10-05): Phases 0–20 are implemented locally. Each phase plan in `docs/plans/` ends with a verification ledger. Production acceptance is not granted (see `docs/operations/production-acceptance.md`). No timing estimates imply completed capability.
 
 | Phase | Scope and dependencies | Acceptance gate |
 |---|---|---|

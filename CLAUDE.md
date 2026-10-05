@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Governance (read first)
 
-Read AGENTS.md, PHASE_0_REVIEW.md and the current phase plan (`docs/plans/phase-1-execution.md`). PROMPT.md is the original brief; user instructions take precedence. Follow the human approval boundary: work only inside the approved phase, never start a later phase without user approval, never push/publish without authorization.
+Read AGENTS.md, PHASE_0_REVIEW.md, ROADMAP.md and the latest phase plan in `docs/plans/` (highest `phase-N-*.md`). PROMPT.md is the original brief; user instructions take precedence. Follow the human approval boundary: work only inside the approved phase, never start a later phase without user approval, never push/publish without authorization.
 
 - Planned is not implemented. Do not describe planned integrations, AI, graph features or controls as working. Every control either works (with tests) or is labeled DEMO/PLANNED.
 - Never fabricate IAM findings, AI outputs, screenshots or test results. Synthetic data must be labeled.
@@ -14,7 +14,9 @@ Read AGENTS.md, PHASE_0_REVIEW.md and the current phase plan (`docs/plans/phase-
 
 ## Status
 
-Phase 0 (design docs) approved; Phase 1 "foundation" is in progress per `docs/plans/phase-1-execution.md`. Top-level docs (README.md, INSTALLATION.md, TESTING.md) still describe the Phase 0 state and lag the code. Phase 1 scope only: OIDC login, PostgreSQL tenant isolation, independent role-change approval, audit/outbox, accessible shell. No graph, AI or connector functionality.
+Phases 0–19 are implemented and committed, one commit per phase. Phase 20 (production packaging: container, TLS proxy compose, secret files, key rotation, probes, backup/restore drill, `docs/operations/` runbooks) is the final roadmap phase. Each `docs/plans/phase-N-*.md` ends with a verification ledger that records what was actually run. Production acceptance is **not** granted: open gates U1–U12 are in `docs/security/phase-18-assessment.md` and `docs/operations/production-acceptance.md`. Top-level README/INSTALLATION may lag the code; plans and ledgers are authoritative.
+
+Known flake source: on this Windows machine, PostgreSQL connection startup slows sharply under CPU load. Tests share one pool per xdist worker (`shared_db` fixture) to limit connects.
 
 ## Commands
 
@@ -37,6 +39,14 @@ npm run build                                                    # tsc --noEmit 
 .venv/Scripts/python -m uvicorn apps.api.app.main:app --host 127.0.0.1 --port 8000   # API also serves apps/web/dist
 .venv/Scripts/python -m apps.worker.main --organization <uuid> [--once]
 npm run dev                                                      # Vite dev server, proxies /api to :8000
+```
+
+Operations (migration URL; superuser):
+```
+.venv/Scripts/python scripts/manage.py status [--verify-audit]   # counts only; exit 1 on problems
+.venv/Scripts/python scripts/manage.py rotate-master-key         # needs SECRET_MASTER_KEY_PREVIOUS
+.venv/Scripts/python -m scripts.backup backup | drill             # pg_dump + manifest; scratch restore + compare
+.venv/Scripts/python -m scripts.package_secrets                   # .local/secrets/ for infra/compose.production.yaml
 ```
 
 Test / lint:
