@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 
-export type Session = { user: { id: string; name: string }; organizations: { id: string; name: string }[]; csrf_token: string; amr: string[]; auth_time: number };
-export type Overview = { organization: { name: string }; environments: { id: string; name: string; kind: string }[]; member_count: number; roles: string[]; capabilities: string[]; identity_data: string };
+export type Deployment = { mode: 'development' | 'production' };
+export type Session = { user: { id: string; name: string }; organizations: { id: string; name: string }[]; csrf_token: string; amr: string[]; auth_time: number; deployment?: Deployment };
+export type Overview = { organization: { name: string }; environments: { id: string; name: string; kind: string }[]; member_count: number; roles: string[]; capabilities: string[]; deployment?: Deployment };
 export type Environment = { id: string; name: string; kind: string; last_sync: string | null };
 export type SnapshotInfo = { effective_at: string; known_at: string; graph_version: string };
 export type Envelope<T> = { data: T; correlation_id: string; snapshot?: SnapshotInfo; completeness?: string; evidence_ids?: string[]; next_cursor?: string | null; [key: string]: unknown };
@@ -40,7 +41,7 @@ export function useResource<T>(path: string | null, deps: unknown[] = []) {
   return { data, error, loading, reload };
 }
 
-export type Ctx = { org: string; env: string; session: Session; can: (capability: string) => boolean; base: string; envKind: string; navigate: (page: string, params?: Record<string, string>) => void; params: Record<string, string>; selectEnv: (id: string) => void };
+export type Ctx = { org: string; env: string; session: Session; dev: boolean; can: (capability: string) => boolean; base: string; envKind: string; navigate: (page: string, params?: Record<string, string>) => void; params: Record<string, string>; selectEnv: (id: string) => void };
 
 export const fmt = (value: unknown) => value === null || value === undefined || value === '' ? '—' : typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(value) ? new Date(value).toISOString().replace('T', ' ').slice(0, 16) + ' UTC' : typeof value === 'object' ? JSON.stringify(value) : String(value);
 export const label = (value: string) => value.replaceAll('_', ' ').toLowerCase().replace(/^./, c => c.toUpperCase());

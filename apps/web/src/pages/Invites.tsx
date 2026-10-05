@@ -25,7 +25,7 @@ export function Invites({ org, session, can }: { org: string; session: Session; 
       {privileged.has(role) && <p className="muted">Privileged role: an independent approver must approve before the link works.</p>}
       <label>Justification<textarea aria-label="Invite justification" required minLength={8} maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}/></label>
       <button className="primary" disabled={busy}>Create invite</button></form>}
-    {link && <div className="notice" role="status"><Check size={16}/><span>Copy this link now — it is shown only once and expires in 72 hours. Email delivery is planned, not implemented.</span>
+    {link && <div className="notice" role="status"><Check size={16}/><span>Copy this link now — it is shown only once and expires in 72 hours. Send it to the person yourself (email, Teams or chat).</span>
       <code className="block">{link}</code><button className="secondary" onClick={() => navigator.clipboard?.writeText(link)}><Copy size={15}/> Copy link</button></div>}
     {error && <p className="error" role="alert">{error}</p>}
     {items.length === 0 ? <p className="empty-text">No invites yet.</p> : <div className="table-scroll"><table><thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Expires</th><th/></tr></thead><tbody>
