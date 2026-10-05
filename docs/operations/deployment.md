@@ -30,7 +30,13 @@ docker compose -f infra/compose.production.yaml up -d --build
 docker compose -f infra/compose.production.yaml ps     # all healthy; migrate exited 0
 ```
 
-The production stack has no `bootstrap` step. Memberships for the first administrators must be created by an operator through `manage.py` against the migration URL, using subjects from the real IdP. The synthetic Contoso bootstrap is for local labs only.
+Create the real organization and its first administrator once:
+
+```
+docker compose -f infra/compose.production.yaml run --rm migrate   python scripts/manage.py init-organization --name "Your Organization" --admin-email admin@your-domain
+```
+
+The command creates the organization, a **Production** environment and a single-use, 72-hour org_admin invite. It prints `/invite/<token>`: prefix it with `APP_ORIGIN` and send it only to that administrator, who registers their own password and one-time code. It refuses to run if an organization already exists (use `--allow-additional` deliberately). The synthetic `bootstrap` command is refused outside development.
 
 ## Configuration
 

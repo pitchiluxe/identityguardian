@@ -167,6 +167,8 @@ The left menu is grouped by purpose. Pages you are not authorized for say *"Rest
 
 > Only **org_admin** members can create invites. Only **approvers** can approve privileged ones.
 
+> **The very first administrator** of a new installation receives their invite link from the operator who ran `init-organization` (see `docs/operations/deployment.md`). Every later user is invited from the app as described below.
+
 ### Create an invite
 
 1. Sign in and open **Administration** (left menu, *Operations*).

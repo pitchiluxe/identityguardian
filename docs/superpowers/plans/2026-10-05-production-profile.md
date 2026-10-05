@@ -67,7 +67,9 @@ PROD = dict(
 
 @pytest.fixture
 def prod_client(shared_db):
-    with TestClient(create_app(Settings(**PROD), db=shared_db), base_url="https://iam.example.com") as c:
+    with TestClient(
+        create_app(Settings(**PROD), db=shared_db), base_url="https://iam.example.com"
+    ) as c:
         yield c
 
 
@@ -105,7 +107,9 @@ def test_mock_connectors_refused_in_production(prod_client, twin):
 def test_development_keeps_tooling(client, twin):
     h = as_user(client, twin["people"], "admin")
     response = client.post(
-        twin["base"] + "/sandbox/seed", headers=h, json={"variant": "standard", "confirm_synthetic": True}
+        twin["base"] + "/sandbox/seed",
+        headers=h,
+        json={"variant": "standard", "confirm_synthetic": True},
     )
     assert response.status_code != 404
 ```
@@ -239,10 +243,13 @@ def test_init_creates_org_env_and_bootstrap_invite_once():
         with pytest.raises(SystemExit):
             init_organization(conn, name, "x@example.org")  # orgs exist; no --allow-additional
         org = made["organization_id"]
-        assert conn.execute("SELECT kind FROM environments WHERE organization_id=%s", (org,)).fetchall() == [("PRODUCTION",)]
+        assert conn.execute(
+            "SELECT kind FROM environments WHERE organization_id=%s", (org,)
+        ).fetchall() == [("PRODUCTION",)]
         token = made["invite_path"].rsplit("/", 1)[1]
         row = conn.execute(
-            "SELECT status, roles, bootstrap, email_normalized FROM invites WHERE token_hash=%s", (digest(token),)
+            "SELECT status, roles, bootstrap, email_normalized FROM invites WHERE token_hash=%s",
+            (digest(token),),
         ).fetchone()
     assert row == ("ACTIVE", ["org_admin"], True, "first.admin@example.org")
     with psycopg.connect(RUNTIME) as conn:
@@ -255,8 +262,10 @@ def test_init_creates_org_env_and_bootstrap_invite_once():
 
 def test_runtime_role_cannot_create_bootstrap_invites():
     with psycopg.connect(RUNTIME) as conn, pytest.raises(psycopg.errors.InsufficientPrivilege):
-        conn.execute("INSERT INTO invites(id,organization_id,email_normalized,roles,token_hash,inviter_id,digest,status,expires_at,bootstrap) "
-                     "VALUES (gen_random_uuid(),gen_random_uuid(),'a@b.c',ARRAY['org_admin'],'h',gen_random_uuid(),'d','ACTIVE',now(),true)")
+        conn.execute(
+            "INSERT INTO invites(id,organization_id,email_normalized,roles,token_hash,inviter_id,digest,status,expires_at,bootstrap) "
+            "VALUES (gen_random_uuid(),gen_random_uuid(),'a@b.c',ARRAY['org_admin'],'h',gen_random_uuid(),'d','ACTIVE',now(),true)"
+        )
 ```
 
 - [ ] **Step 2: Run, expect FAIL** (ImportError `init_organization`).
@@ -302,13 +311,24 @@ def init_organization(conn, name, admin_email, allow_additional=False):
     expires = datetime.now(timezone.utc) + timedelta(hours=72)
     conn.execute("SELECT set_config('app.org', %s, true)", (str(org),))
     conn.execute("INSERT INTO organizations VALUES (%s,%s)", (org, name))
-    conn.execute("INSERT INTO environments(id,organization_id,name,kind) VALUES (%s,%s,'Production','PRODUCTION')", (env, org))
+    conn.execute(
+        "INSERT INTO environments(id,organization_id,name,kind) VALUES (%s,%s,'Production','PRODUCTION')",
+        (env, org),
+    )
     conn.execute(
         "INSERT INTO invites(id,organization_id,email_normalized,roles,token_hash,inviter_id,digest,"
         "justification,status,expires_at,bootstrap) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'ACTIVE',%s,true)",
-        (invite, org, email, ["org_admin"], digest(token), SYSTEM_INVITER,
-         invite_digest(org, email, "org_admin", expires.isoformat()),
-         "Operator bootstrap of the first administrator", expires),
+        (
+            invite,
+            org,
+            email,
+            ["org_admin"],
+            digest(token),
+            SYSTEM_INVITER,
+            invite_digest(org, email, "org_admin", expires.isoformat()),
+            "Operator bootstrap of the first administrator",
+            expires,
+        ),
     )
     for action, target in (("organization.initialized", org), ("invite.created", invite)):
         conn.execute(
