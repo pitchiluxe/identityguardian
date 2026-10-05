@@ -2,26 +2,27 @@
 
 **Autonomous Identity Intelligence, Governance & Security Platform**
 
-Status: Phase 1 local foundation implemented and tested on loopback: OIDC login (Keycloak), opaque sessions/CSRF, PostgreSQL row-level tenant isolation, independent platform-role approval, append-only audit, outbox worker and an accessible shell. Identity ingestion, graph, AI, connectors and every later-phase capability remain PLANNED.
+**Live showcase:** https://identityguardian.vercel.app · **Contact:** see the showcase page
 
-Identity access is scattered across directories, groups, policies and applications. IdentityGuardian AI is designed to explain who can reach a resource, why, what evidence supports that conclusion, and what would happen if access changed.
+Status: Phases 1–21 are implemented and tested locally against real Keycloak (OIDC + PKCE + TOTP) and PostgreSQL. They cover tenant isolation (RLS), independent approval, an append-only hash-chained audit, digital twin ingestion, effective-access lineage, privilege radar, defensive exposure paths, access reviews, what-if simulation, JIT and sandbox execution, machine and AI-agent governance, joiner/mover/leaver, a bitemporal time machine, a grounded local Ollama investigator, policy-as-code, IAM labs, a mock connector framework, evidence-cited reports, security hardening, performance work, packaging and invite-based registration. **All data is synthetic. Connectors are mock or sandbox only. The platform is not production-accepted**; see [docs/operations/production-acceptance.md](docs/operations/production-acceptance.md).
 
-Investigate → explain → recommend → simulate → authorized human approval → controlled execution → audit. Initial execution is simulated only.
+Identity access is scattered across directories, groups, policies and applications. IdentityGuardian AI explains who can reach a resource, why, what evidence supports that conclusion, and what would happen if access changed.
 
-## Review the design
+Investigate → explain → recommend → simulate → authorized human approval → controlled (sandbox) execution → audit. AI output is advisory and has no execution authority.
 
-Start with [PHASE_0_REVIEW.md](PHASE_0_REVIEW.md). Supporting documents: [architecture](ARCHITECTURE.md), [database](DATABASE.md), [graph](GRAPH.md), [security](SECURITY.md), [threat model](THREAT_MODEL.md), [roadmap](ROADMAP.md), [requirements](REQUIREMENTS.md).
+## Where to look
 
-## Planned capabilities
+- Per-phase plans and verification ledgers: [docs/plans/](docs/plans/)
+- Design: [architecture](ARCHITECTURE.md), [database](DATABASE.md), [graph](GRAPH.md), [security](SECURITY.md), [threat model](THREAT_MODEL.md), [roadmap](ROADMAP.md)
+- Operations runbooks: [docs/operations/](docs/operations/)
+- Showcase page source: [showcase/](showcase/)
 
-Interactive digital twin, access lineage, privilege creep, defensive exposure paths, evidence-backed reviews, what-if simulation, temporary privilege workflows, machine and agent governance, lifecycle controls, historical reconstruction, grounded local AI, policy proposals and guided IAM labs.
-
-Proposed stack: React/TypeScript, FastAPI, PostgreSQL, local Keycloak and Ollama. Concepts demonstrated: RBAC, contextual ABAC, nested grants, separation of duties, PAM, IGA, JML, SCIM and SAML/OIDC troubleshooting. See [AI.md](AI.md), [UI.md](UI.md), [API.md](API.md) and [INTEGRATIONS.md](INTEGRATIONS.md).
+Stack: React 19 + TypeScript + Vite, FastAPI, PostgreSQL 17 with row-level security, Keycloak, Ollama, pytest and Playwright.
 
 ## Demo and installation
 
-[INSTALLATION.md](INSTALLATION.md) lists the verified local setup and its limitations. [DEMO.md](DEMO.md) defines the Contoso investigation; [LABS.md](LABS.md) defines exercises. Future verified captures belong in [screenshots](docs/screenshots/README.md) and [videos](docs/videos/README.md). No fabricated screenshots are included.
+[INSTALLATION.md](INSTALLATION.md) lists the verified local setup and its limitations. [DEMO.md](DEMO.md) defines the Contoso investigation; [LABS.md](LABS.md) defines exercises. Screenshots in [showcase/shots](showcase/shots) were captured from the running local build (`CAPTURE=1 npx playwright test tests/e2e/capture.spec.ts`). No fabricated screenshots are included.
 
 ## Contributing
 
-Read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [TESTING.md](TESTING.md) and [CHANGELOG.md](CHANGELOG.md). The original brief is [PROMPT.md](PROMPT.md). Each later phase is gated on user approval.
+Read [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md), [TESTING.md](TESTING.md) and [CHANGELOG.md](CHANGELOG.md). The original brief is [PROMPT.md](PROMPT.md). Each phase is gated on owner approval.
