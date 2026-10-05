@@ -60,6 +60,10 @@ def membership(conn, user_id, capability=None):
     return row
 
 
+NOT_PROVISIONED = (
+    "Your account has no access to this platform yet. Ask an administrator for an invite link, "
+    'open it, and choose "I already have an account".'
+)
 REFUSALS = {
     "invalid": "This invite is no longer valid — ask your administrator for a new one",
     "expired": "This invite is no longer valid — ask your administrator for a new one",
@@ -239,7 +243,8 @@ def complete_login(request: Request):
             else:
                 user = {"id": redeemed["user_id"]}
         elif not user:
-            raise HTTPException(403, "This identity has not been provisioned for the platform")
+            # A valid IdP account is not platform access; tell the person how to get an invite.
+            raise HTTPException(403, NOT_PROVISIONED)
         if refusal is None:
             conn.execute(
                 "DELETE FROM sessions WHERE token_hash=%s",

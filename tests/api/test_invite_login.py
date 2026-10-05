@@ -11,6 +11,11 @@ from apps.api.app.config import Settings
 from tests.api.oidc_support import fake_idp
 from tests.api.test_invites import create
 
+NOT_PROVISIONED = (
+    "Your account has no access to this platform yet. Ask an administrator for an invite link, "
+    'open it, and choose "I already have an account".'
+)
+
 
 def start(client, token):
     client.cookies.clear()
@@ -95,7 +100,7 @@ def test_unknown_subject_without_invite_still_refused(client, monkeypatch):
         f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False
     )
     assert done.status_code == 403
-    assert done.json()["detail"] == "This identity has not been provisioned for the platform"
+    assert done.json()["detail"] == NOT_PROVISIONED
 
 
 def test_invite_deep_link_serves_shell_without_invite_details(client, tenant):
