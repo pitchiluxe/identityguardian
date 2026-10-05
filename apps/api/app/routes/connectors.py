@@ -173,6 +173,12 @@ def create_entra(org: UUID, env: UUID, body: EntraRequest, request: Request):
             raise HTTPException(
                 409, "Entra ID connectors belong in a SANDBOX or PRODUCTION environment"
             )
+        if scope.conn.execute(
+            "SELECT 1 FROM connectors WHERE environment_id=%s AND kind='entra'", (env,)
+        ).fetchone():
+            raise HTTPException(
+                409, "This environment already has an Entra ID tenant; use a separate environment"
+            )
         connector_id = uuid4()
         try:
             sealed = seal(

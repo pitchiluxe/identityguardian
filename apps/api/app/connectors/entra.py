@@ -25,7 +25,9 @@ LISTS = {
     "jobTitle,userType&$top=100",
     "groups": "/groups?$select=id,displayName,securityEnabled&$top=100",
     "roles": "/directoryRoles?$select=id,displayName",
-    "apps": "/servicePrincipals?$select=id,displayName,appId&$top=100",
+    # The tenant's enterprise applications only (not Microsoft first-party principals).
+    "apps": "/servicePrincipals?$filter=tags/any(t:t eq 'WindowsAzureActiveDirectoryIntegratedApp')"
+    "&$select=id,displayName,appId&$top=100",
 }
 EXPAND = {  # stage -> (queue name, URL template)
     "group_members": ("groups", "/groups/{}/members?$select=id&$top=100"),
@@ -171,6 +173,7 @@ class EntraConnector(Connector):
             tenant=self.tenant,
             stage=state["stage"],
             skipped_group_app_assignments=state["skipped"],
+            truncated=bool(state.get("truncated")),
         )
         done = state["stage"] == "done"
         return Page(
@@ -239,7 +242,9 @@ class EntraConnector(Connector):
                 oid, _node(oid, "role", item.get("displayName") or item["id"], "directory_role", {})
             )
             state["roles"].append(item["id"])
-        elif stage == "apps" and len(state["apps"]) < MAX_APPS:
+        elif stage == "apps" and len(state["apps"]) >= MAX_APPS:
+            state["truncated"] = True  # not every app was read: coverage cannot be authoritative
+        elif stage == "apps":
             emit(
                 oid,
                 _node(
@@ -266,7 +271,7 @@ class EntraConnector(Connector):
                 "entra:" + parent,
                 {},
             )
-            body["attributes"]["origin"] = "app_assignment"
+            body["attributes"]["origin"] = "application_role"
             emit(rid, body)
             return
         kind = item.get("@odata.type")
@@ -286,5 +291,7 @@ class EntraConnector(Connector):
         rid = f"entra-{stage}:{parent}:{item['id']}"
         body = _rel(rid, rel, "entra:" + item["id"], "entra:" + parent, {})
         if stage == "role_members":
-            body["attributes"]["origin"] = "directory_role"
+            body["attributes"]["origin"] = "role"
+        elif rel == "GROUP_INHERITS_GROUP":
+            body["attributes"]["origin"] = "nested_membership"
         emit(rid, body)

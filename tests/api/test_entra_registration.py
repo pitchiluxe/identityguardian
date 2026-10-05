@@ -16,7 +16,13 @@ from apps.api.app.main import create_app
 from apps.worker.main import process_one
 from tests.api.conftest import as_user
 from tests.api.test_production_profile import PROD
-from tests.unit.test_entra_connector import CLIENT, SECRET, TENANT, FakeMicrosoft
+from tests.unit.test_entra_connector import (
+    CLIENT,
+    SECRET,
+    TENANT,
+    TENANT_DATA,
+    FakeMicrosoft,
+)
 
 BODY = dict(
     kind="entra", name="Entra demo tenant", tenant_id=TENANT, client_id=CLIENT, client_secret=SECRET
@@ -182,3 +188,69 @@ def test_unexpected_connector_error_finishes_the_run_instead_of_looping(client, 
     monkeypatch.setattr(entra, "EntraConnector", lambda *a, **k: Broken())
     monkeypatch.setenv("SECRET_MASTER_KEY", client.app.state.settings.secret_master_key)
     assert queue_and_run(client, twin, env, connector) == ("PARTIAL", 0, "FAILING")
+
+
+def test_one_entra_connector_per_environment(client, twin):
+    # Two tenants in one environment would share source 'entra' and tombstone each other.
+    env = sandbox_env(twin["org"])
+    assert create(client, twin, env).status_code == 201
+    second = create(client, twin, env, body=dict(BODY, name="Second tenant"))
+    assert second.status_code == 409 and "already" in second.json()["detail"]
+
+
+def test_synced_relationships_keep_meaningful_origins(client, twin, monkeypatch):
+    env = sandbox_env(twin["org"])
+    connector = create(client, twin, env).json()["data"]
+    real = entra.EntraConnector
+    monkeypatch.setattr(
+        entra,
+        "EntraConnector",
+        lambda config, secret, http=None: real(
+            config, secret, http=httpx.Client(transport=httpx.MockTransport(FakeMicrosoft()))
+        ),
+    )
+    monkeypatch.setenv("SECRET_MASTER_KEY", client.app.state.settings.secret_master_key)
+    queue_and_run(client, twin, env, connector)
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        origins = dict(
+            conn.execute(
+                "SELECT r.type, rr.attributes->>'origin' FROM relationships r JOIN relationship_revisions rr "
+                "ON rr.relationship_id=r.id WHERE r.environment_id=%s AND rr.recorded_to IS NULL",
+                (env,),
+            ).fetchall()
+        )
+    assert origins["USER_HAS_ROLE"] == "role"
+    assert origins["GROUP_INHERITS_GROUP"] == "nested_membership"
+    assert origins["SERVICE_ACCOUNT_ACCESS_APPLICATION"] == "application_role"
+    assert origins["USER_MEMBER_OF_GROUP"] == "group_membership"
+
+
+def test_truncated_app_list_is_reported_as_partial_coverage(client, twin, monkeypatch):
+    env = sandbox_env(twin["org"])
+    connector = create(client, twin, env).json()["data"]
+    many = dict(
+        TENANT_DATA,
+        **{
+            "/servicePrincipals": [
+                dict(id=f"sp{i}", displayName=f"App {i}", appId=f"a{i}") for i in range(205)
+            ]
+        },
+    )
+    real = entra.EntraConnector
+    monkeypatch.setattr(
+        entra,
+        "EntraConnector",
+        lambda config, secret, http=None: real(
+            config,
+            secret,
+            http=httpx.Client(transport=httpx.MockTransport(FakeMicrosoft(data=many))),
+        ),
+    )
+    monkeypatch.setenv("SECRET_MASTER_KEY", client.app.state.settings.secret_master_key)
+    queue_and_run(client, twin, env, connector)
+    with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
+        coverage = conn.execute(
+            "SELECT coverage FROM sync_runs WHERE connector_id=%s ORDER BY started_at DESC LIMIT 1",
+            (connector["id"],),
+        ).fetchone()[0]
+    assert coverage == "partial"  # not every app was read, so absence proves nothing

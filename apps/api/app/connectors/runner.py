@@ -136,6 +136,9 @@ def run_job(db, org: UUID, connector_id: UUID, mode: str, actor_id=None, backoff
                 totals[k] += v - before[k]
             errors += ingestor.errors[errors_before:]
             pages += 1
+            if page.provenance.get("truncated"):
+                # The source could not be read completely: absence must not close relationships.
+                conn.execute("UPDATE sync_runs SET coverage='partial' WHERE id=%s", (run_id,))
             conn.execute(
                 "UPDATE sync_runs SET observed=%s, unchanged=%s, created=%s, updated=%s, rejected=%s, "
                 "cursor_token=%s, pages=%s, retries=%s WHERE id=%s",
