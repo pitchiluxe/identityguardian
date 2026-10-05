@@ -173,6 +173,10 @@ def create_app(settings=None, db=None):
             response.headers["Strict-Transport-Security"] = "max-age=31536000"
         return response
 
+    def deployment():
+        # Display-only context for the shell; every restriction is enforced server-side.
+        return {"mode": "development" if app.state.settings.development else "production"}
+
     @app.get("/api/v1/health")
     def health():
         # Liveness: the process answers. Never touches the database.
@@ -207,6 +211,7 @@ def create_app(settings=None, db=None):
             "user": {"id": user["user_id"], "name": user["display_name"]},
             "organizations": organizations,
             "csrf_token": digest("csrf:" + request.cookies["ig_session"]),
+            "deployment": deployment(),
             "amr": user["amr"],
             "auth_time": user["auth_time"],
         }
@@ -236,8 +241,7 @@ def create_app(settings=None, db=None):
             "member_count": count,
             "roles": member["roles"],
             "capabilities": sorted(capabilities(member["roles"])),
-            "phase": 1,
-            "identity_data": "Not ingested — Phase 2 planned",
+            "deployment": deployment(),
         }
 
     @app.get("/api/v1/organizations/{org}/members")

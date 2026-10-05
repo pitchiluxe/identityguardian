@@ -73,3 +73,13 @@ def test_development_keeps_tooling(client, twin):
         json={"variant": "standard", "confirm_synthetic": True},
     )
     assert response.status_code != 404
+
+
+def test_session_and_overview_report_mode(client, prod_client, tenant):
+    org, _, people = tenant
+    for c, mode in ((client, "development"), (prod_client, "production")):
+        as_user(c, people, "viewer")
+        assert c.get("/api/v1/session").json()["deployment"] == {"mode": mode}
+        overview = c.get(f"/api/v1/organizations/{org}/overview").json()
+        assert overview["deployment"] == {"mode": mode}
+        assert "phase" not in overview and "identity_data" not in overview
