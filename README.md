@@ -4,6 +4,8 @@
 
 **Live showcase:** https://identityguardian.vercel.app · **Contact:** see the showcase page
 
+**How to use it and get access:** read the [User Manual](USER_MANUAL.md). Access is by invite only — request one from **erickomari243@gmail.com**.
+
 Status: Phases 1–21 are implemented and tested locally against real Keycloak (OIDC + PKCE + TOTP) and PostgreSQL. They cover tenant isolation (RLS), independent approval, an append-only hash-chained audit, digital twin ingestion, effective-access lineage, privilege radar, defensive exposure paths, access reviews, what-if simulation, JIT and sandbox execution, machine and AI-agent governance, joiner/mover/leaver, a bitemporal time machine, a grounded local Ollama investigator, policy-as-code, IAM labs, a mock connector framework, evidence-cited reports, security hardening, performance work, packaging and invite-based registration. **All data is synthetic. Connectors are mock or sandbox only. The platform is not production-accepted**; see [docs/operations/production-acceptance.md](docs/operations/production-acceptance.md).
 
 Identity access is scattered across directories, groups, policies and applications. IdentityGuardian AI explains who can reach a resource, why, what evidence supports that conclusion, and what would happen if access changed.
