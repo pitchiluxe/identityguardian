@@ -3,7 +3,7 @@ import type { ReactNode } from 'react';
 import { ShieldCheck, LayoutDashboard, Network, Users, KeyRound, Layers, Radar, Route,
   ClipboardCheck, Clock3, Bot, Cpu, GitBranch, FlaskConical, History, FileCheck2,
   Search, GraduationCap, FileText, ScrollText, Plug, Settings, Sparkles, ArrowUpRight,
-  LockKeyhole, ChevronRight, LogOut, RefreshCw, Menu, X, Info } from 'lucide-react';
+  LockKeyhole, SlidersHorizontal, ChevronRight, LogOut, RefreshCw, Menu, X, Info } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { api, useResource } from './api';
 import type { Ctx, Environment, Envelope, Overview, Session } from './api';
@@ -18,7 +18,7 @@ const navigation: NavItem[] = [
   ['Access reviews', ClipboardCheck, 'Governance'], ['JIT access', Clock3, 'Governance'], ['Lifecycle', GitBranch, 'Governance'], ['What-if simulator', FlaskConical, 'Governance'], ['Change requests', FileCheck2, 'Governance'], ['Policies', FileCheck2, 'Governance'],
   ['Machine identities', Cpu, 'Non-human'], ['AI agents', Bot, 'Non-human'],
   ['Labs', GraduationCap, 'Learning'],
-  ['Reports', FileText, 'Operations'], ['Audit logs', ScrollText, 'Operations'], ['Integrations', Plug, 'Operations'], ['Administration', Settings, 'Operations'], ['AI assistant', Sparkles, 'Operations'],
+  ['Reports', FileText, 'Operations'], ['Audit logs', ScrollText, 'Operations'], ['Integrations', Plug, 'Operations'], ['Administration', Settings, 'Operations'], ['Settings', SlidersHorizontal, 'Operations'], ['AI assistant', Sparkles, 'Operations'],
 ];
 
 function Brand() { return <div className="brand"><span className="brand-mark"><ShieldCheck size={24}/></span><span>IdentityGuardian<span className="brand-ai">AI</span></span></div>; }

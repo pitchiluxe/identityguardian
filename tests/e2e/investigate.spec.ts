@@ -5,7 +5,7 @@ test('investigator answers with cited evidence and refuses mutating requests', a
   test.setTimeout(240_000);
   await signIn(page, 'casey');
   await open(page, 'Investigations');
-  await page.getByRole('checkbox', { name: /Ask the local model/ }).uncheck();
+  await page.getByRole('checkbox', { name: /Ask the AI model/ }).uncheck();
   await page.locator('form').getByRole('button', { name: 'Who can access payroll?' }).click();
   await expect(page.getByText('FALLBACK', { exact: true })).toBeVisible({ timeout: 30000 });
   await expect(page.getByRole('heading', { name: 'Evidence bundle' })).toBeVisible();

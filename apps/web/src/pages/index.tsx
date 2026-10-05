@@ -7,6 +7,7 @@ import { Access } from './Access';
 import { Agents } from './Agents';
 import { Administration, AuditIntegrity, AuditLog, EnvironmentForm } from './Admin';
 import { Invites } from './Invites';
+import { SettingsPage } from './Settings';
 import { ChangeRequests, WhatIf } from './Changes';
 import { Integrations } from './Integrations';
 import { Investigate } from './Investigate';
@@ -67,6 +68,7 @@ export const PAGES: Record<string, PageDef> = {
   Reports: { subtitle: 'Evidence-cited, redacted, expiring exports.', capability: 'report:read', render: ctx => <Reports {...ctx}/> },
   'Identity graph': { subtitle: 'Typed relationships around one node. Depth and size are bounded.', capability: 'graph:read', render: ctx => <GraphExplorer {...ctx}/> },
   Integrations: { subtitle: 'Identity sources, sync coverage and history.', capability: 'identity:read', render: ctx => <Integrations {...ctx}/> },
+  Settings: { subtitle: 'AI provider, API keys and organization AI policy.', capability: 'overview:read', org: true, render: ctx => <SettingsPage {...ctx}/> },
   Administration: { subtitle: 'Platform memberships and independent role changes.', capability: 'members:read', denied: 'Your current role cannot view or change platform memberships.', org: true, render: ctx => <><Administration org={ctx.org} session={ctx.session} can={ctx.can}/><Invites org={ctx.org} session={ctx.session} can={ctx.can}/>{ctx.can('connector:manage') && <EnvironmentForm org={ctx.org} session={ctx.session}/>}</> },
   'Audit logs': { subtitle: 'Append-only platform audit trail.', capability: 'audit:read', denied: 'An auditor or organization administrator role is required.', org: true, render: ctx => <><AuditIntegrity org={ctx.org} session={ctx.session}/><AuditLog org={ctx.org}/></> },
 };
