@@ -14,7 +14,7 @@ Read AGENTS.md, PHASE_0_REVIEW.md, ROADMAP.md and the latest phase plan in `docs
 
 ## Status
 
-Phases 0–19 are implemented and committed, one commit per phase. Phase 20 (production packaging: container, TLS proxy compose, secret files, key rotation, probes, backup/restore drill, `docs/operations/` runbooks) is the final roadmap phase. Each `docs/plans/phase-N-*.md` ends with a verification ledger that records what was actually run. Production acceptance is **not** granted: open gates U1–U12 are in `docs/security/phase-18-assessment.md` and `docs/operations/production-acceptance.md`. Top-level README/INSTALLATION may lag the code; plans and ledgers are authoritative.
+Phases 0–19 are implemented and committed, one commit per phase. Phase 20 (production packaging: container, TLS proxy compose, secret files, key rotation, probes, backup/restore drill, `docs/operations/` runbooks) is the final roadmap phase. Phase 21 (invite-based registration: `routes/invites.py`, `redeem_invite`/`invite_usable` in `migrations/023_invites.sql`, `/api/v1/auth/register`, Keycloak self-registration with mandatory TOTP) follows the roadmap; its spec and plan are in `docs/superpowers/`. Each `docs/plans/phase-N-*.md` ends with a verification ledger that records what was actually run. Production acceptance is **not** granted: open gates U1–U12 are in `docs/security/phase-18-assessment.md` and `docs/operations/production-acceptance.md`. Top-level README/INSTALLATION may lag the code; plans and ledgers are authoritative.
 
 Known flake source: on this Windows machine, PostgreSQL connection startup slows sharply under CPU load. Tests share one pool per xdist worker (`shared_db` fixture) to limit connects.
 

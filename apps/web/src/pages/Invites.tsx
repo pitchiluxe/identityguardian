@@ -20,10 +20,10 @@ export function Invites({ org, session, can }: { org: string; session: Session; 
   const status = (i: Invite) => (['ACTIVE', 'PENDING_APPROVAL'].includes(i.status) && new Date(i.expires_at) < new Date()) ? 'EXPIRED' : i.status;
   return <section className="panel"><div className="section-heading"><h2>Invites</h2><span>Invitees register their own password and one-time code</span></div><div className="pad">
     {can('members:propose') && <form className="proposal" onSubmit={submit}><div className="form-grid">
-      <label>Email<input className="text-input" type="email" required value={email} onChange={e => setEmail(e.target.value)}/></label>
-      <label>Role<select value={role} onChange={e => setRole(e.target.value)}>{roles.map(r => <option key={r}>{r}</option>)}</select></label></div>
+      <label>Email<input className="text-input" aria-label="Invite email" type="email" required value={email} onChange={e => setEmail(e.target.value)}/></label>
+      <label>Role<select aria-label="Invite role" value={role} onChange={e => setRole(e.target.value)}>{roles.map(r => <option key={r}>{r}</option>)}</select></label></div>
       {privileged.has(role) && <p className="muted">Privileged role: an independent approver must approve before the link works.</p>}
-      <label>Justification<textarea required minLength={8} maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}/></label>
+      <label>Justification<textarea aria-label="Invite justification" required minLength={8} maxLength={1000} value={reason} onChange={e => setReason(e.target.value)}/></label>
       <button className="primary" disabled={busy}>Create invite</button></form>}
     {link && <div className="notice" role="status"><Check size={16}/><span>Copy this link now — it is shown only once and expires in 72 hours. Email delivery is planned, not implemented.</span>
       <code className="block">{link}</code><button className="secondary" onClick={() => navigator.clipboard?.writeText(link)}><Copy size={15}/> Copy link</button></div>}

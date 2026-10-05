@@ -76,7 +76,13 @@ def seed(status="ACTIVE", roles=("viewer",), email="new.person@example.org", hou
             "INSERT INTO invites(id,organization_id,email_normalized,roles,token_hash,inviter_id,"
             "digest,status,expires_at) VALUES (%s,%s,%s,%s,%s,%s,'d',%s,%s)",
             (
-                uuid4(), org, email, list(roles), digest(token), inviter, status,
+                uuid4(),
+                org,
+                email,
+                list(roles),
+                digest(token),
+                inviter,
+                status,
                 datetime.now(timezone.utc) + timedelta(hours=hours),
             ),
         )
@@ -318,7 +324,9 @@ def test_privileged_invite_needs_independent_mfa_approval(client, tenant):
     body = dict(digest=made["digest"], decision="APPROVE")
     assert client.post(url, headers=as_user(client, people, "admin"), json=body).status_code == 403
     stale = dict(digest="0" * 64, decision="APPROVE")
-    assert client.post(url, headers=as_user(client, people, "approver"), json=stale).status_code == 409
+    assert (
+        client.post(url, headers=as_user(client, people, "approver"), json=stale).status_code == 409
+    )
     ok = client.post(url, headers=as_user(client, people, "approver"), json=body)
     assert ok.status_code == 200 and ok.json()["data"]["status"] == "ACTIVE"
     again = client.post(url, headers=as_user(client, people, "approver2"), json=body)
@@ -334,9 +342,12 @@ def test_only_admins_create_and_cross_tenant_is_hidden(client, tenant):
     assert client.post(
         f"/api/v1/organizations/{other}/invites/{made['id']}/revoke", headers=headers
     ).status_code in (403, 404)
-    assert client.post(
-        f"/api/v1/organizations/{org}/invites/{uuid4()}/revoke", headers=headers
-    ).status_code == 404
+    assert (
+        client.post(
+            f"/api/v1/organizations/{org}/invites/{uuid4()}/revoke", headers=headers
+        ).status_code
+        == 404
+    )
 
 
 def test_revoke_and_validation(client, tenant):
@@ -358,7 +369,9 @@ def test_decision_on_expired_invite_is_refused(client, tenant):
     org, _, people = tenant
     made = create(client, org, people, role="operator")["invite"]
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
-        conn.execute("UPDATE invites SET expires_at=now()-interval '1 minute' WHERE id=%s", (made["id"],))
+        conn.execute(
+            "UPDATE invites SET expires_at=now()-interval '1 minute' WHERE id=%s", (made["id"],)
+        )
     response = client.post(
         f"/api/v1/organizations/{org}/invites/{made['id']}/decision",
         headers=as_user(client, people, "approver"),
@@ -393,7 +406,9 @@ from ..security import digest, require_recent_mfa
 
 router = APIRouter(prefix="/api/v1/organizations/{org}", dependencies=[Depends(require_session)])
 PRIVILEGED = {"org_admin", "approver", "operator"}
-Role = Literal["viewer", "investigator", "reviewer", "approver", "operator", "org_admin", "auditor", "learner"]
+Role = Literal[
+    "viewer", "investigator", "reviewer", "approver", "operator", "org_admin", "auditor", "learner"
+]
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 COLUMNS = (
     "id, email_normalized, roles, inviter_id, approver_id, approved_at, digest, justification, "
@@ -445,13 +460,24 @@ def create(org: UUID, body: InviteBody, request: Request):
             f"digest,justification,status,expires_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) "
             f"RETURNING {COLUMNS}",
             (
-                identifier, org, body.email, [body.role], digest(token), scope.user_id,
+                identifier,
+                org,
+                body.email,
+                [body.role],
+                digest(token),
+                scope.user_id,
                 invite_digest(org, body.email, body.role, expires.isoformat()),
-                body.justification, status, expires,
+                body.justification,
+                status,
+                expires,
             ),
         ).fetchone()
-        scope.audit("invite.created", identifier, body.justification,
-                    after=dict(email=body.email, roles=[body.role], status=status))
+        scope.audit(
+            "invite.created",
+            identifier,
+            body.justification,
+            after=dict(email=body.email, roles=[body.role], status=status),
+        )
         outbox(scope.conn, org, identifier)
         return envelope(scope, dict(invite=row, link=f"/invite/{token}"))
 
@@ -493,8 +519,14 @@ def decide(org: UUID, identifier: UUID, body: Decision, request: Request):
             f"RETURNING {COLUMNS}",
             (scope.user_id, identifier),
         ).fetchone()
-        scope.audit("invite.approved", identifier, row["justification"], approval=identifier,
-                    before=dict(status=row["status"]), after=dict(status="ACTIVE"))
+        scope.audit(
+            "invite.approved",
+            identifier,
+            row["justification"],
+            approval=identifier,
+            before=dict(status=row["status"]),
+            after=dict(status="ACTIVE"),
+        )
         outbox(scope.conn, org, identifier)
         return envelope(scope, updated)
 
@@ -508,8 +540,13 @@ def revoke(org: UUID, identifier: UUID, request: Request):
         updated = scope.conn.execute(
             f"UPDATE invites SET status='REVOKED' WHERE id=%s RETURNING {COLUMNS}", (identifier,)
         ).fetchone()
-        scope.audit("invite.revoked", identifier, "Invite revoked by administrator",
-                    before=dict(status=row["status"]), after=dict(status="REVOKED"))
+        scope.audit(
+            "invite.revoked",
+            identifier,
+            "Invite revoked by administrator",
+            before=dict(status=row["status"]),
+            after=dict(status="REVOKED"),
+        )
         outbox(scope.conn, org, identifier)
         return envelope(scope, updated)
 ```
@@ -567,25 +604,41 @@ def start(client, token):
 
 def claims(settings, params, subject, email="pat@example.org", **extra):
     now = int(time.time())
-    return dict(iss=settings.oidc_issuer_url, aud=settings.oidc_client_id, sub=subject,
-                nonce=params["nonce"][0], exp=now + 300, iat=now, auth_time=now,
-                amr=["pwd", "otp"], email=email, name="Pat Example", **extra)
+    return dict(
+        iss=settings.oidc_issuer_url,
+        aud=settings.oidc_client_id,
+        sub=subject,
+        nonce=params["nonce"][0],
+        exp=now + 300,
+        iat=now,
+        auth_time=now,
+        amr=["pwd", "otp"],
+        email=email,
+        name="Pat Example",
+        **extra,
+    )
 
 
 def test_invitee_registers_and_gets_exactly_the_invited_role(client, tenant, monkeypatch):
     org, _, people = tenant
     link = create(client, org, people, role="investigator")["link"]
     response, params = start(client, link.split("/")[-1])
-    assert response.status_code == 302 and "/protocol/openid-connect/registrations" in response.headers["location"]
+    assert (
+        response.status_code == 302
+        and "/protocol/openid-connect/registrations" in response.headers["location"]
+    )
     assert params["scope"] == ["openid profile email"]
     settings, subject = Settings(), str(uuid4())
     fake_idp(monkeypatch, settings, params, claims(settings, params, subject, roles=["org_admin"]))
-    done = client.get(f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False)
+    done = client.get(
+        f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False
+    )
     assert done.status_code == 303
     with psycopg.connect(os.environ["MIGRATION_DATABASE_URL"]) as conn:
         roles = conn.execute(
             "SELECT m.roles FROM memberships m JOIN users u ON u.id=m.user_id "
-            "WHERE u.subject=%s AND m.organization_id=%s", (subject, org)
+            "WHERE u.subject=%s AND m.organization_id=%s",
+            (subject, org),
         ).fetchone()[0]
     assert roles == ["investigator"]  # token role claims ignored
     assert client.get("/api/v1/session").status_code == 200
@@ -603,8 +656,15 @@ def test_email_mismatch_is_refused_with_fixed_message(client, tenant, monkeypatc
     link = create(client, org, people)["link"]
     _, params = start(client, link.split("/")[-1])
     settings = Settings()
-    fake_idp(monkeypatch, settings, params, claims(settings, params, str(uuid4()), email="other@example.org"))
-    done = client.get(f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False)
+    fake_idp(
+        monkeypatch,
+        settings,
+        params,
+        claims(settings, params, str(uuid4()), email="other@example.org"),
+    )
+    done = client.get(
+        f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False
+    )
     assert done.status_code == 403
     assert done.json()["detail"] == "Sign in with the email address the invite was sent to"
 
@@ -615,7 +675,9 @@ def test_unknown_subject_without_invite_still_refused(client, monkeypatch):
     params = parse_qs(urlparse(redirect.headers["location"]).query)
     settings = Settings()
     fake_idp(monkeypatch, settings, params, claims(settings, params, str(uuid4())))
-    done = client.get(f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False)
+    done = client.get(
+        f"/api/v1/auth/callback?code=c&state={params['state'][0]}", follow_redirects=False
+    )
     assert done.status_code == 403
     assert done.json()["detail"] == "This identity has not been provisioned for the platform"
 ```
@@ -646,9 +708,13 @@ def begin_registration(request: Request, invite: str = ""):
     usable = False
     if 20 <= len(token) <= 128:
         with request.app.state.db.transaction() as conn:
-            usable = conn.execute("SELECT invite_usable(%s) AS ok", (digest(token),)).fetchone()["ok"]
+            usable = conn.execute("SELECT invite_usable(%s) AS ok", (digest(token),)).fetchone()[
+                "ok"
+            ]
     if not usable:
-        return RedirectResponse("/invite/invalid", status_code=303)  # same response for every failure
+        return RedirectResponse(
+            "/invite/invalid", status_code=303
+        )  # same response for every failure
     return _begin(request, endpoint="registrations", invite_hash=digest(token))
 ```
 
@@ -657,19 +723,23 @@ def begin_registration(request: Request, invite: str = ""):
 In `complete_login`, replace the `if not user: raise HTTPException(403, ...)` block with:
 
 ```python
-        if attempt.get("invite_hash"):
-            redeemed = conn.execute(
-                "SELECT * FROM redeem_invite(%s,%s,%s,%s,%s)",
-                (attempt["invite_hash"], claims["iss"], claims["sub"],
-                 str(claims.get("name") or claims.get("preferred_username") or ""),
-                 str(claims.get("email") or "")),
-            ).fetchone()
-            if redeemed["reason"]:
-                logging.getLogger("identityguardian").info("Invite refused: %s", redeemed["reason"])
-                raise HTTPException(403, REFUSALS[redeemed["reason"]])
-            user = {"id": redeemed["user_id"]}
-        elif not user:
-            raise HTTPException(403, "This identity has not been provisioned for the platform")
+if attempt.get("invite_hash"):
+    redeemed = conn.execute(
+        "SELECT * FROM redeem_invite(%s,%s,%s,%s,%s)",
+        (
+            attempt["invite_hash"],
+            claims["iss"],
+            claims["sub"],
+            str(claims.get("name") or claims.get("preferred_username") or ""),
+            str(claims.get("email") or ""),
+        ),
+    ).fetchone()
+    if redeemed["reason"]:
+        logging.getLogger("identityguardian").info("Invite refused: %s", redeemed["reason"])
+        raise HTTPException(403, REFUSALS[redeemed["reason"]])
+    user = {"id": redeemed["user_id"]}
+elif not user:
+    raise HTTPException(403, "This identity has not been provisioned for the platform")
 ```
 
 Note: the 403 raised inside `db.transaction()` rolls back nothing that the function committed, because the function runs in the same transaction and refusals write nothing. Only the success path writes.
@@ -703,7 +773,9 @@ def configure_registration(client, headers):
     realm = client.get(admin, headers=headers).json()
     realm.update(registrationAllowed=True, passwordPolicy="length(12) and notUsername")
     client.put(admin, headers=headers, json=realm).raise_for_status()
-    action = client.get(f"{admin}/authentication/required-actions/CONFIGURE_TOTP", headers=headers).json()
+    action = client.get(
+        f"{admin}/authentication/required-actions/CONFIGURE_TOTP", headers=headers
+    ).json()
     action.update(enabled=True, defaultAction=True)
     client.put(
         f"{admin}/authentication/required-actions/CONFIGURE_TOTP", headers=headers, json=action
